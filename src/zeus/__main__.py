@@ -1,8 +1,10 @@
+"""Zeus - Visual Application Designer.
+
+A low-code/no-code desktop platform for developers, built with PyQt6.
+"""
+
 import sys
-
-
-def main():
-    print("Hello from zeus!")
+from zeus.app import main
 
 
 if __name__ == "__main__":
