@@ -9,3 +9,14 @@ It provides a desktop interface with a visual designer to build powerful scalabl
 
 ![Intro Screenshot](/docs/images/intro.png)
 
+## Installation
+
+```bash
+uv sync
+```
+
+## Running
+
+```bash
+uv run python -m zeus
+```
