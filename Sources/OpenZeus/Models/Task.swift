@@ -5,6 +5,7 @@ import SwiftData
 final class AgentTask {
     @Attribute(.unique) var id: UUID
     var name: String
+    var taskDescription: String?
     var command: String
     var environment: [String: String]
     var workingDirectory: URL
@@ -15,6 +16,7 @@ final class AgentTask {
     init(
         id: UUID = UUID(),
         name: String,
+        taskDescription: String? = nil,
         command: String,
         environment: [String: String] = [:],
         workingDirectory: URL,
@@ -24,6 +26,7 @@ final class AgentTask {
     ) {
         self.id = id
         self.name = name
+        self.taskDescription = taskDescription
         self.command = command
         self.environment = environment
         self.workingDirectory = workingDirectory
