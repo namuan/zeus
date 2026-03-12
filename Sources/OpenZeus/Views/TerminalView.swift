@@ -47,6 +47,9 @@ struct TerminalRepresentable: NSViewRepresentable {
             let cwd = task.workingDirectory.path(percentEncoded: false)
             terminalView.startProcess(executable: shell, args: ["-l"], currentDirectory: cwd)
             coordinator.isRunning = true
+            DispatchQueue.main.async {
+                terminalView.window?.makeFirstResponder(terminalView)
+            }
         }
     }
 
