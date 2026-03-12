@@ -8,10 +8,9 @@ struct TaskList: View {
     @State private var showingNewTask = false
 
     var body: some View {
-        List(selection: $selection) {
+        List {
             ForEach(project.tasks) { task in
-                TaskRow(task: task)
-                    .tag(task)
+                TaskRow(task: task, onSelect: { selection = task })
             }
             .onDelete(perform: deleteTasks)
         }
@@ -102,6 +101,7 @@ struct NewTaskSheet: View {
 
 private struct TaskRow: View {
     let task: AgentTask
+    let onSelect: () -> Void
 
     var body: some View {
         HStack {
@@ -113,6 +113,12 @@ private struct TaskRow: View {
             }
             Spacer()
             StatusBadge(status: task.status)
+            Button(action: onSelect) {
+                Image(systemName: "terminal")
+                    .font(.body)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.blue)
         }
         .padding(.vertical, 2)
     }
