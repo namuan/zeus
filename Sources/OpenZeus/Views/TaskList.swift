@@ -91,7 +91,7 @@ struct NewTaskSheet: View {
         let task = AgentTask(
             name: trimmed,
             taskDescription: trimmed,
-            command: "",
+            command: ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/bash",
             workingDirectory: project.directoryURL,
             project: project
         )
