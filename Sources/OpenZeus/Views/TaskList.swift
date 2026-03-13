@@ -10,9 +10,31 @@ struct TaskList: View {
     var body: some View {
         List {
             ForEach(project.tasks) { task in
-                TaskRow(task: task, onSelect: { selection = task })
+                TaskRow(task: task, isSelected: selection?.id == task.id, onSelect: { selection = task })
             }
             .onDelete(perform: deleteTasks)
+        }
+        .safeAreaInset(edge: .bottom) {
+            if let task = selection {
+                HStack(spacing: 6) {
+                    Image(systemName: "terminal.fill")
+                        .foregroundStyle(Color.accentColor)
+                    Group {
+                        if let projectName = task.project?.name {
+                            Text(projectName).bold() + Text("  ›  \(task.name)")
+                        } else {
+                            Text(task.name)
+                        }
+                    }
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                }
+                .font(.caption)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.bar)
+            }
         }
         .navigationTitle(project.name)
         .toolbar {
@@ -101,26 +123,51 @@ struct NewTaskSheet: View {
 
 private struct TaskRow: View {
     let task: AgentTask
+    let isSelected: Bool
     let onSelect: () -> Void
 
     var body: some View {
-        HStack {
-            VStack(alignment: .leading) {
-                Text(task.taskDescription ?? task.name)
-                    .font(.headline)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top) {
+                descriptionText
+                Spacer()
+                if isSelected {
+                    Image(systemName: "terminal.fill")
+                        .font(.caption)
+                        .foregroundStyle(Color.accentColor)
+                        .padding(.top, 2)
+                }
             }
-            Spacer()
-            StatusBadge(status: task.status)
-            Button(action: onSelect) {
-                Image(systemName: "terminal")
-                    .font(.body)
+
+            HStack {
+                StatusBadge(status: task.status)
+                Spacer()
+                Button(action: onSelect) {
+                    Label("Open Terminal", systemImage: "terminal")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.mini)
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.blue)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private var descriptionText: some View {
+        let description = task.taskDescription ?? task.name
+        let lines = description.components(separatedBy: "\n")
+        if lines.count > 1, let first = lines.first {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(first)
+                    .font(.headline)
+                Text(lines.dropFirst().joined(separator: "\n"))
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            Text(description)
+                .font(.headline)
+        }
     }
 }
 
