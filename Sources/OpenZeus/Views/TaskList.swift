@@ -148,7 +148,9 @@ private struct TaskRow: View {
             }
 
             HStack {
-                StatusBadge(status: task.status)
+                if task.status != .idle {
+                    StatusBadge(status: task.status)
+                }
                 if terminalStore.activeProcessTaskIDs.contains(task.id) {
                     ActiveProcessBadge()
                 }
@@ -184,6 +186,8 @@ private struct TaskRow: View {
                 : Color.clear
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
+        .contentShape(Rectangle())
+        .onTapGesture { onSelect() }
         .sheet(isPresented: $showingEdit) {
             EditTaskSheet(task: task)
         }
