@@ -131,6 +131,7 @@ private struct TaskRow: View {
     let isSelected: Bool
     let onSelect: () -> Void
 
+    @EnvironmentObject var terminalStore: TerminalStore
     @State private var showingEdit = false
 
     var body: some View {
@@ -148,6 +149,9 @@ private struct TaskRow: View {
 
             HStack {
                 StatusBadge(status: task.status)
+                if terminalStore.activeProcessTaskIDs.contains(task.id) {
+                    ActiveProcessBadge()
+                }
                 Spacer()
                 Button {
                     let text = task.taskDescription ?? task.name
@@ -253,6 +257,24 @@ private struct EditTaskSheet: View {
         task.name = trimmed
         task.taskDescription = trimmed
         dismiss()
+    }
+}
+
+private struct ActiveProcessBadge: View {
+    var body: some View {
+        HStack(spacing: 3) {
+            Circle()
+                .fill(.green)
+                .frame(width: 6, height: 6)
+            Text("Active")
+                .font(.caption2)
+                .fontWeight(.medium)
+                .foregroundStyle(.green)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(.green.opacity(0.12))
+        .clipShape(Capsule())
     }
 }
 

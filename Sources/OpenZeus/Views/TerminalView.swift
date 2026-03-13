@@ -88,11 +88,3 @@ private struct TerminalRepresentable: NSViewRepresentable {
     }
 }
 
-private func tmuxExecutable() -> String? {
-    let candidates = [
-        "/opt/homebrew/bin/tmux", // Apple Silicon Homebrew
-        "/usr/local/bin/tmux",    // Intel Homebrew
-        "/usr/bin/tmux",
-    ]
-    return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
-}

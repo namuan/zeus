@@ -3,6 +3,7 @@ import SwiftData
 
 struct ProjectList: View {
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject var terminalStore: TerminalStore
     let projects: [Project]
     @Binding var selection: Project?
     let activeTask: AgentTask?
@@ -10,8 +11,13 @@ struct ProjectList: View {
     var body: some View {
         List(selection: $selection) {
             ForEach(projects) { project in
-                ProjectRow(project: project, activeTask: activeTask, isSelected: selection == project)
-                    .tag(project)
+                ProjectRow(
+                    project: project,
+                    activeTask: activeTask,
+                    isSelected: selection == project,
+                    hasActiveProcess: project.tasks.contains { terminalStore.activeProcessTaskIDs.contains($0.id) }
+                )
+                .tag(project)
             }
             .onDelete(perform: deleteProjects)
         }
@@ -53,11 +59,19 @@ private struct ProjectRow: View {
     let project: Project
     let activeTask: AgentTask?
     let isSelected: Bool
+    let hasActiveProcess: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(project.name)
-                .font(.headline)
+            HStack(alignment: .center, spacing: 6) {
+                Text(project.name)
+                    .font(.headline)
+                if hasActiveProcess {
+                    Circle()
+                        .fill(isSelected ? Color.white : Color.green)
+                        .frame(width: 6, height: 6)
+                }
+            }
             Text(project.directoryURL.path(percentEncoded: false))
                 .font(.caption)
                 .foregroundStyle(isSelected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
