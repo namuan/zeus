@@ -12,8 +12,8 @@ struct TaskList: View {
         return showArchived ? all : all.filter { !$0.isArchived }
     }
 
-    private var hasArchivedTasks: Bool {
-        appDatabase.tasks(for: project.id).contains { $0.isArchived }
+    private var archivedTaskCount: Int {
+        appDatabase.tasks(for: project.id).filter { $0.isArchived }.count
     }
 
     var body: some View {
@@ -37,12 +37,23 @@ struct TaskList: View {
             }
             .buttonStyle(.plain)
 
-            if hasArchivedTasks {
+            if archivedTaskCount > 0 {
                 Button(action: { showArchived.toggle() }) {
-                    Label(
-                        showArchived ? "Hide Archived" : "Show Archived",
-                        systemImage: showArchived ? "archivebox.fill" : "archivebox"
-                    )
+                    HStack(spacing: 6) {
+                        Label(
+                            showArchived ? "Hide Archived" : "Show Archived",
+                            systemImage: showArchived ? "archivebox.fill" : "archivebox"
+                        )
+                        if !showArchived {
+                            Text("\(archivedTaskCount)")
+                                .font(.caption2)
+                                .fontWeight(.medium)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(.secondary.opacity(0.2))
+                                .clipShape(Capsule())
+                        }
+                    }
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 4)
