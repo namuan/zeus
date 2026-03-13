@@ -45,13 +45,6 @@ struct TaskList: View {
             }
         }
         .navigationTitle(project.name)
-        .toolbar {
-            ToolbarItem {
-                Button(action: { showingNewTask = true }) {
-                    Label("Add Task", systemImage: "plus")
-                }
-            }
-        }
         .sheet(isPresented: $showingNewTask) {
             NewTaskSheet(project: project) { task in
                 selection = task

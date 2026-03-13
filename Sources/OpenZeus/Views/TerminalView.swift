@@ -16,23 +16,14 @@ private struct TerminalPaneContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text(task.name)
-                    .font(.headline)
-                Spacer()
-                if entry.tmuxUnavailable {
-                    Label("tmux not found — sessions won't persist", systemImage: "exclamationmark.triangle")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                } else {
-                    Text(entry.isRunning ? "Running" : "Stopped")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+            if entry.tmuxUnavailable {
+                Label("tmux not found — sessions won't persist", systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.bar)
             }
-            .padding()
-            .background(.bar)
-
             TerminalRepresentable(task: task, entry: entry)
         }
         .navigationTitle(task.name)
