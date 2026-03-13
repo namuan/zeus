@@ -40,17 +40,21 @@ private struct TerminalPaneContent: View {
     }
 }
 
+private class TerminalContainerView: NSView {
+    override func scrollWheel(with event: NSEvent) {
+        subviews.first?.scrollWheel(with: event) ?? super.scrollWheel(with: event)
+    }
+}
+
 private struct TerminalRepresentable: NSViewRepresentable {
     let task: AgentTask
     let entry: TerminalEntry
 
-    func makeNSView(context: Context) -> NSView {
-        let container = NSView()
-        container.autoresizesSubviews = true
-        return container
+    func makeNSView(context: Context) -> TerminalContainerView {
+        TerminalContainerView()
     }
 
-    func updateNSView(_ container: NSView, context: Context) {
+    func updateNSView(_ container: TerminalContainerView, context: Context) {
         let terminalView = entry.terminalView
 
         // Swap in the correct terminal view if it isn't already the active subview
@@ -75,13 +79,21 @@ private struct TerminalRepresentable: NSViewRepresentable {
 
         if let tmux = tmuxExecutable() {
             let sessionName = "zeus-\(task.id.uuidString)"
-            // -A: attach to existing session if present, otherwise create
-            // Providing the shell ensures new sessions start with the user's shell
             terminalView.startProcess(
                 executable: tmux,
                 args: ["new-session", "-A", "-s", sessionName, shell, "-l"],
                 currentDirectory: cwd
             )
+            // Enable mouse scrolling on the tmux server.
+            // Runs after a short delay to ensure the session is ready.
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) {
+                let p = Process()
+                p.executableURL = URL(fileURLWithPath: tmux)
+                p.arguments = ["set-option", "-g", "mouse", "on"]
+                p.standardOutput = Pipe()
+                p.standardError = Pipe()
+                try? p.run()
+            }
         } else {
             entry.tmuxUnavailable = true
             terminalView.startProcess(
