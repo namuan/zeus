@@ -9,7 +9,7 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView {
-            ProjectList(projects: projects, selection: $selectedProject)
+            ProjectList(projects: projects, selection: $selectedProject, activeTask: selectedTask)
         } content: {
             if let project = selectedProject {
                 TaskList(project: project, selection: $selectedTask)
