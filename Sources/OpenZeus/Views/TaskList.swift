@@ -73,14 +73,16 @@ struct NewTaskSheet: View {
     let project: Project
     var onCreated: (AgentTask) -> Void = { _ in }
 
-    @State private var description = ""
+    @State private var text = ""
+
+    private static let placeholder = "Task title…\n\nTask description…"
 
     var body: some View {
         VStack(spacing: 16) {
             Text("New Task")
                 .font(.title2.bold())
 
-            TextEditor(text: $description)
+            TextEditor(text: $text)
                 .font(.body)
                 .frame(minHeight: 120)
                 .padding(4)
@@ -89,10 +91,11 @@ struct NewTaskSheet: View {
                         .stroke(.quaternary, lineWidth: 1)
                 )
                 .overlay(alignment: .topLeading) {
-                    if description.isEmpty {
-                        Text("Enter task description…")
+                    if text.isEmpty {
+                        Text(Self.placeholder)
                             .foregroundStyle(.tertiary)
                             .padding(8)
+                            .allowsHitTesting(false)
                     }
                 }
 
@@ -108,7 +111,7 @@ struct NewTaskSheet: View {
                     save()
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(24)
@@ -116,10 +119,11 @@ struct NewTaskSheet: View {
     }
 
     private func save() {
-        let trimmed = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lines = text.components(separatedBy: "\n")
+        let title = lines.first?.trimmingCharacters(in: .whitespaces) ?? ""
         let task = AgentTask(
-            name: trimmed,
-            taskDescription: trimmed,
+            name: title.isEmpty ? text.trimmingCharacters(in: .whitespacesAndNewlines) : title,
+            taskDescription: text.trimmingCharacters(in: .whitespacesAndNewlines),
             command: ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/bash",
             workingDirectory: project.directoryURL,
             project: project
