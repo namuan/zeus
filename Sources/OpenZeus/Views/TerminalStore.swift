@@ -90,23 +90,47 @@ private final class TerminalEntryDelegate: NSObject, LocalProcessTerminalViewDel
 final class TerminalStore: ObservableObject {
     private var entries: [UUID: TerminalEntry] = [:]
     @Published private(set) var activeProcessTaskIDs: Set<UUID> = []
+    @Published private(set) var attentionTaskIDs: Set<UUID> = []
     private var cancellables: Set<AnyCancellable> = []
+
+    // Per-task metadata needed to fire notifications without a DB lookup
+    private var taskMetadata: [UUID: (name: String, watchMode: WatchMode)] = [:]
+    private let notifier = ActivityNotifier()
 
     func entry(for id: UUID) -> TerminalEntry {
         if let existing = entries[id] { return existing }
         let entry = TerminalEntry(taskID: id)
         entries[id] = entry
         entry.$hasActiveProcess
+            .removeDuplicates()
+            .scan((false, false)) { ($0.1, $1) }   // (previousValue, currentValue)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self, id] isActive in
+            .sink { [weak self, id] pair in
+                guard let self else { return }
+                let (wasActive, isActive) = pair
                 if isActive {
-                    self?.activeProcessTaskIDs.insert(id)
+                    self.activeProcessTaskIDs.insert(id)
                 } else {
-                    self?.activeProcessTaskIDs.remove(id)
+                    self.activeProcessTaskIDs.remove(id)
+                    // Transition active → idle: fire alert if watch mode is on
+                    if wasActive, let meta = self.taskMetadata[id], meta.watchMode != .off {
+                        self.attentionTaskIDs.insert(id)
+                        self.notifier.notify(taskName: meta.name, watchMode: meta.watchMode)
+                    }
                 }
             }
             .store(in: &cancellables)
         return entry
+    }
+
+    /// Update cached metadata for a task (call when the task's terminal opens or watch mode changes).
+    func updateTaskMetadata(taskID: UUID, name: String, watchMode: WatchMode) {
+        taskMetadata[taskID] = (name: name, watchMode: watchMode)
+    }
+
+    /// Clear the attention state when the user opens the task's terminal.
+    func clearAttention(taskID: UUID) {
+        attentionTaskIDs.remove(taskID)
     }
 }
 

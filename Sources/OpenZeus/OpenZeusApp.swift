@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 @main
 struct OpenZeusApp: App {
@@ -10,6 +11,13 @@ struct OpenZeusApp: App {
             ContentView()
                 .environmentObject(terminalStore)
                 .environmentObject(appDatabase)
+                .onAppear {
+                    UNUserNotificationCenter.current()
+                        .requestAuthorization(options: [.alert, .sound]) { _, _ in }
+                    DispatchQueue.main.async {
+                        NSApp.windows.first?.zoom(nil)
+                    }
+                }
         }
     }
 }

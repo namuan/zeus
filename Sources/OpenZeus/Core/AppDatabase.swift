@@ -41,6 +41,11 @@ final class AppDatabase: ObservableObject {
                 t.column("terminalState", .text)
             }
         }
+        migrator.registerMigration("v2") { db in
+            try db.alter(table: "tasks") { t in
+                t.add(column: "watchMode", .text).notNull().defaults(to: "off")
+            }
+        }
         try migrator.migrate(db)
     }
 

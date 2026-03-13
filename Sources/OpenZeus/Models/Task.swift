@@ -11,6 +11,7 @@ struct AgentTask: Identifiable {
     var workingDirectory: URL
     var status: AgentStatus
     var terminalState: TerminalState?
+    var watchMode: WatchMode = .off
 }
 
 extension AgentTask: Equatable {
@@ -32,6 +33,7 @@ extension AgentTask: FetchableRecord {
            let data = tsString.data(using: .utf8) {
             terminalState = try? JSONDecoder().decode(TerminalState.self, from: data)
         }
+        watchMode = WatchMode(rawValue: row["watchMode"] as? String ?? "") ?? .off
     }
 }
 
@@ -53,5 +55,6 @@ extension AgentTask: PersistableRecord {
         } else {
             container["terminalState"] = nil
         }
+        container["watchMode"] = watchMode.rawValue
     }
 }

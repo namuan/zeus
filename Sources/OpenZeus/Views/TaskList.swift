@@ -119,6 +119,7 @@ private struct TaskRow: View {
     let onDelete: () -> Void
 
     @EnvironmentObject var terminalStore: TerminalStore
+    @EnvironmentObject var appDatabase: AppDatabase
     @State private var showingEdit = false
 
     var body: some View {
@@ -141,7 +142,23 @@ private struct TaskRow: View {
                 if terminalStore.activeProcessTaskIDs.contains(task.id) {
                     ActiveProcessBadge()
                 }
+                if terminalStore.attentionTaskIDs.contains(task.id) {
+                    Image(systemName: "bell.badge.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
                 Spacer()
+                Button {
+                    var updated = task
+                    updated.watchMode = task.watchMode.next
+                    appDatabase.updateTask(updated)
+                    terminalStore.updateTaskMetadata(taskID: task.id, name: task.name, watchMode: updated.watchMode)
+                } label: {
+                    Image(systemName: task.watchMode.systemImage)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(task.watchMode == .off ? .secondary : Color.orange)
+                .help(task.watchMode.label)
                 Button {
                     let text = task.taskDescription ?? task.name
                     NSPasteboard.general.clearContents()

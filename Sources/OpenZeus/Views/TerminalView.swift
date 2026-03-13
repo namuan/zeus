@@ -7,6 +7,16 @@ struct TerminalPane: View {
 
     var body: some View {
         TerminalPaneContent(task: task, entry: terminalStore.entry(for: task.id))
+            .onAppear {
+                terminalStore.updateTaskMetadata(taskID: task.id, name: task.name, watchMode: task.watchMode)
+                terminalStore.clearAttention(taskID: task.id)
+            }
+            .onChange(of: task.watchMode) { _, newMode in
+                terminalStore.updateTaskMetadata(taskID: task.id, name: task.name, watchMode: newMode)
+            }
+            .onChange(of: task.name) { _, newName in
+                terminalStore.updateTaskMetadata(taskID: task.id, name: newName, watchMode: task.watchMode)
+            }
     }
 }
 
