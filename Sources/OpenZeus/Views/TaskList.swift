@@ -13,6 +13,14 @@ struct TaskList: View {
                 TaskRow(task: task, isSelected: selection?.id == task.id, onSelect: { selection = task })
             }
             .onDelete(perform: deleteTasks)
+
+            Button(action: { showingNewTask = true }) {
+                Label("New Task", systemImage: "plus.circle.fill")
+                    .foregroundStyle(Color.accentColor)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 4)
+            }
+            .buttonStyle(.plain)
         }
         .safeAreaInset(edge: .bottom) {
             if let task = selection {
@@ -45,7 +53,9 @@ struct TaskList: View {
             }
         }
         .sheet(isPresented: $showingNewTask) {
-            NewTaskSheet(project: project)
+            NewTaskSheet(project: project) { task in
+                selection = task
+            }
         }
     }
 
@@ -64,6 +74,7 @@ struct NewTaskSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     let project: Project
+    var onCreated: (AgentTask) -> Void = { _ in }
 
     @State private var description = ""
 
@@ -118,6 +129,7 @@ struct NewTaskSheet: View {
         )
         modelContext.insert(task)
         dismiss()
+        onCreated(task)
     }
 }
 
