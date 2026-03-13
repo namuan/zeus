@@ -149,7 +149,14 @@ private struct TaskRow: View {
                 .controlSize(.mini)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            isSelected
+                ? Color.accentColor.opacity(0.12)
+                : Color.clear
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     @ViewBuilder
