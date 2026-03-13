@@ -94,10 +94,17 @@ private struct WindowControlBar: View {
             .disabled(entry.windows.count <= 1)
             .help("Next Window")
 
-            Button { entry.tileWindows() } label: {
-                Image(systemName: "rectangle.split.2x2")
+            Divider().frame(height: 16)
+
+            Button { entry.splitHorizontal() } label: {
+                Image(systemName: "rectangle.split.2x1")
             }
-            .help("Cycle Pane Layout")
+            .help("Split Pane Horizontally")
+
+            Button { entry.splitVertical() } label: {
+                Image(systemName: "rectangle.split.1x2")
+            }
+            .help("Split Pane Vertically")
 
             Button { entry.closeWindow() } label: {
                 Image(systemName: "xmark")

@@ -22,8 +22,6 @@ final class TerminalEntry: ObservableObject {
 
     private let delegate: TerminalEntryDelegate
     private var pollTimer: Timer?
-    private var tileLayoutIndex: Int = 0
-    private let tileLayouts = ["tiled", "even-horizontal", "even-vertical", "main-horizontal", "main-vertical"]
 
     private static let knownShells: Set<String> = [
         "zsh", "bash", "sh", "fish", "dash", "csh", "tcsh", "login",
@@ -129,13 +127,25 @@ final class TerminalEntry: ObservableObject {
         }
     }
 
-    func tileWindows() {
+    func splitHorizontal() {
+        splitPane(direction: "-h")
+    }
+
+    func splitVertical() {
+        splitPane(direction: "-v")
+    }
+
+    private func splitPane(direction: String) {
         guard let tmux = tmuxExecutable() else { return }
         let sessionName = "zeus-\(taskID.uuidString)"
-        tileLayoutIndex = (tileLayoutIndex + 1) % tileLayouts.count
-        let layout = tileLayouts[tileLayoutIndex]
+        var args = ["split-window", direction, "-t", sessionName]
+        if !workingDirectory.isEmpty {
+            args += ["-c", workingDirectory]
+        }
         Task {
-            await runProcessOutput(tmux, args: ["select-layout", "-t", sessionName, layout])
+            await runProcessOutput(tmux, args: args)
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            await checkActiveProcess()
         }
     }
 
