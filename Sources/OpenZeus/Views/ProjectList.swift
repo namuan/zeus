@@ -15,7 +15,8 @@ struct ProjectList: View {
                     project: project,
                     activeTask: activeTask,
                     isSelected: selection == project,
-                    hasActiveProcess: project.tasks.contains { terminalStore.activeProcessTaskIDs.contains($0.id) }
+                    hasActiveProcess: project.tasks.contains { terminalStore.activeProcessTaskIDs.contains($0.id) },
+                    onRemove: { removeProject(project) }
                 )
                 .tag(project)
             }
@@ -44,14 +45,13 @@ struct ProjectList: View {
         selection = project
     }
 
+    private func removeProject(_ project: Project) {
+        if selection == project { selection = nil }
+        modelContext.delete(project)
+    }
+
     private func deleteProjects(offsets: IndexSet) {
-        for index in offsets {
-            let project = projects[index]
-            modelContext.delete(project)
-            if selection == project {
-                selection = nil
-            }
-        }
+        for index in offsets { removeProject(projects[index]) }
     }
 }
 
@@ -60,6 +60,7 @@ private struct ProjectRow: View {
     let activeTask: AgentTask?
     let isSelected: Bool
     let hasActiveProcess: Bool
+    let onRemove: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -87,5 +88,10 @@ private struct ProjectRow: View {
             }
         }
         .padding(.vertical, 2)
+        .contextMenu {
+            Button(role: .destructive, action: onRemove) {
+                Label("Remove from App", systemImage: "minus.circle")
+            }
+        }
     }
 }

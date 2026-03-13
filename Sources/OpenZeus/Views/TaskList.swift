@@ -10,7 +10,12 @@ struct TaskList: View {
     var body: some View {
         List {
             ForEach(project.tasks) { task in
-                TaskRow(task: task, isSelected: selection?.id == task.id, onSelect: { selection = task })
+                TaskRow(
+                    task: task,
+                    isSelected: selection?.id == task.id,
+                    onSelect: { selection = task },
+                    onDelete: { deleteTask(task) }
+                )
             }
             .onDelete(perform: deleteTasks)
 
@@ -52,14 +57,13 @@ struct TaskList: View {
         }
     }
 
+    private func deleteTask(_ task: AgentTask) {
+        if selection == task { selection = nil }
+        modelContext.delete(task)
+    }
+
     private func deleteTasks(offsets: IndexSet) {
-        for index in offsets {
-            let task = project.tasks[index]
-            modelContext.delete(task)
-            if selection == task {
-                selection = nil
-            }
-        }
+        for index in offsets { deleteTask(project.tasks[index]) }
     }
 }
 
@@ -130,6 +134,7 @@ private struct TaskRow: View {
     let task: AgentTask
     let isSelected: Bool
     let onSelect: () -> Void
+    let onDelete: () -> Void
 
     @EnvironmentObject var terminalStore: TerminalStore
     @State private var showingEdit = false
@@ -164,6 +169,11 @@ private struct TaskRow: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
+                Button(role: .destructive, action: onDelete) {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.red.opacity(0.7))
                 Button {
                     showingEdit = true
                 } label: {
