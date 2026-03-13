@@ -2,6 +2,11 @@ import AppKit
 import Combine
 import SwiftTerm
 
+struct TmuxWindow: Equatable {
+    let index: Int
+    let name: String
+}
+
 @MainActor
 final class TerminalEntry: ObservableObject {
     let taskID: UUID
@@ -11,9 +16,14 @@ final class TerminalEntry: ObservableObject {
     }
     @Published var hasActiveProcess = false
     @Published var tmuxUnavailable = false
+    @Published var windows: [TmuxWindow] = []
+    @Published var currentWindowIndex: Int = 0
+    var workingDirectory: String = ""
 
     private let delegate: TerminalEntryDelegate
     private var pollTimer: Timer?
+    private var tileLayoutIndex: Int = 0
+    private let tileLayouts = ["tiled", "even-horizontal", "even-vertical", "main-horizontal", "main-vertical"]
 
     private static let knownShells: Set<String> = [
         "zsh", "bash", "sh", "fish", "dash", "csh", "tcsh", "login",
@@ -32,6 +42,7 @@ final class TerminalEntry: ObservableObject {
 
     private func startPolling() {
         guard pollTimer == nil else { return }
+        Task { await checkActiveProcess() }  // immediate check on start
         pollTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             guard let self else { return }
             Task { await self.checkActiveProcess() }
@@ -47,14 +58,109 @@ final class TerminalEntry: ObservableObject {
     private func checkActiveProcess() async {
         guard let tmux = tmuxExecutable() else { return }
         let sessionName = "zeus-\(taskID.uuidString)"
-        let output = await runProcessOutput(tmux, args: [
+        async let commandFuture = runProcessOutput(tmux, args: [
             "display-message", "-p", "-t", sessionName, "#{pane_current_command}",
         ])
-        let command = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        async let windowsFuture = runProcessOutput(tmux, args: [
+            "list-windows", "-t", sessionName, "-F",
+            "#{window_index}\t#{window_name}\t#{window_active}",
+        ])
+        let (commandOutput, windowsOutput) = await (commandFuture, windowsFuture)
+        let command = commandOutput.trimmingCharacters(in: .whitespacesAndNewlines)
         hasActiveProcess = !command.isEmpty && !Self.knownShells.contains(command)
+        parseWindowState(windowsOutput)
+    }
+
+    private func parseWindowState(_ output: String) {
+        let lines = output
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: "\n")
+            .map(String.init)
+            .filter { !$0.isEmpty }
+        var wins: [TmuxWindow] = []
+        var activeIdx = 0
+        for line in lines {
+            let parts = line.split(separator: "\t", maxSplits: 2).map(String.init)
+            guard parts.count == 3, let idx = Int(parts[0]) else { continue }
+            wins.append(TmuxWindow(index: idx, name: parts[1]))
+            if parts[2].trimmingCharacters(in: .whitespacesAndNewlines) == "1" {
+                activeIdx = idx
+            }
+        }
+        if !wins.isEmpty {
+            windows = wins
+            currentWindowIndex = activeIdx
+        }
+    }
+
+    // MARK: - Tmux window control
+
+    func openWindow() {
+        guard let tmux = tmuxExecutable() else { return }
+        let sessionName = "zeus-\(taskID.uuidString)"
+        var args = ["new-window", "-t", sessionName]
+        if !workingDirectory.isEmpty {
+            args += ["-c", workingDirectory]
+        }
+        Task {
+            await runProcessOutput(tmux, args: args)
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            await checkActiveProcess()
+        }
+    }
+
+    func nextWindow() {
+        guard let tmux = tmuxExecutable() else { return }
+        let sessionName = "zeus-\(taskID.uuidString)"
+        Task {
+            await runProcessOutput(tmux, args: ["next-window", "-t", sessionName])
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            await checkActiveProcess()
+        }
+    }
+
+    func previousWindow() {
+        guard let tmux = tmuxExecutable() else { return }
+        let sessionName = "zeus-\(taskID.uuidString)"
+        Task {
+            await runProcessOutput(tmux, args: ["previous-window", "-t", sessionName])
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            await checkActiveProcess()
+        }
+    }
+
+    func tileWindows() {
+        guard let tmux = tmuxExecutable() else { return }
+        let sessionName = "zeus-\(taskID.uuidString)"
+        tileLayoutIndex = (tileLayoutIndex + 1) % tileLayouts.count
+        let layout = tileLayouts[tileLayoutIndex]
+        Task {
+            await runProcessOutput(tmux, args: ["select-layout", "-t", sessionName, layout])
+        }
+    }
+
+    func closeWindow() {
+        guard let tmux = tmuxExecutable() else { return }
+        let sessionName = "zeus-\(taskID.uuidString)"
+        Task {
+            await runProcessOutput(tmux, args: ["kill-window", "-t", sessionName])
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            await checkActiveProcess()
+        }
+    }
+
+    func selectWindow(index: Int) {
+        guard let tmux = tmuxExecutable() else { return }
+        let sessionName = "zeus-\(taskID.uuidString)"
+        Task {
+            await runProcessOutput(tmux, args: ["select-window", "-t", "\(sessionName):\(index)"])
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            await checkActiveProcess()
+        }
     }
 }
 
+@discardableResult
 private nonisolated func runProcessOutput(_ executable: String, args: [String]) async -> String {
     await withCheckedContinuation { continuation in
         let process = Process()
@@ -124,8 +230,9 @@ final class TerminalStore: ObservableObject {
     }
 
     /// Update cached metadata for a task (call when the task's terminal opens or watch mode changes).
-    func updateTaskMetadata(taskID: UUID, name: String, watchMode: WatchMode) {
+    func updateTaskMetadata(taskID: UUID, name: String, watchMode: WatchMode, workingDirectory: String = "") {
         taskMetadata[taskID] = (name: name, watchMode: watchMode)
+        entries[taskID]?.workingDirectory = workingDirectory
     }
 
     /// Clear the attention state when the user opens the task's terminal.

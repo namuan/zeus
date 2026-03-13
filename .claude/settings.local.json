@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(swift build:*)"
+      "Bash(swift build:*)",
+      "Bash(swift --version && swift package describe)",
+      "Bash(ln -s CLAUDE.md /Users/nnn/workspace/zeus/AGENTS.md)"
     ]
   }
 }
