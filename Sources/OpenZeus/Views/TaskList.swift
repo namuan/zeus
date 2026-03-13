@@ -131,6 +131,8 @@ private struct TaskRow: View {
     let isSelected: Bool
     let onSelect: () -> Void
 
+    @State private var showingEdit = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .top) {
@@ -147,6 +149,22 @@ private struct TaskRow: View {
             HStack {
                 StatusBadge(status: task.status)
                 Spacer()
+                Button {
+                    let text = task.taskDescription ?? task.name
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: .string)
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                Button {
+                    showingEdit = true
+                } label: {
+                    Image(systemName: "pencil")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
                 Button(action: onSelect) {
                     Label("Open Terminal", systemImage: "terminal")
                 }
@@ -162,6 +180,9 @@ private struct TaskRow: View {
                 : Color.clear
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
+        .sheet(isPresented: $showingEdit) {
+            EditTaskSheet(task: task)
+        }
     }
 
     @ViewBuilder
@@ -180,6 +201,58 @@ private struct TaskRow: View {
             Text(description)
                 .font(.headline)
         }
+    }
+}
+
+private struct EditTaskSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let task: AgentTask
+
+    @State private var description: String
+
+    init(task: AgentTask) {
+        self.task = task
+        self._description = State(initialValue: task.taskDescription ?? task.name)
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("Edit Task")
+                .font(.title2.bold())
+
+            TextEditor(text: $description)
+                .font(.body)
+                .frame(minHeight: 120)
+                .padding(4)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(.quaternary, lineWidth: 1)
+                )
+
+            HStack {
+                Button("Cancel") {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Spacer()
+
+                Button("Save") {
+                    save()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(24)
+        .frame(minWidth: 400)
+    }
+
+    private func save() {
+        let trimmed = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        task.name = trimmed
+        task.taskDescription = trimmed
+        dismiss()
     }
 }
 
