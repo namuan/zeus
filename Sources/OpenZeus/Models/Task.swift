@@ -12,6 +12,7 @@ struct AgentTask: Identifiable {
     var status: AgentStatus
     var terminalState: TerminalState?
     var watchMode: WatchMode = .off
+    var isArchived: Bool = false
 }
 
 extension AgentTask: Equatable {
@@ -34,6 +35,7 @@ extension AgentTask: FetchableRecord {
             terminalState = try? JSONDecoder().decode(TerminalState.self, from: data)
         }
         watchMode = WatchMode(rawValue: row["watchMode"] as? String ?? "") ?? .off
+        isArchived = (row["isArchived"] as? Int64 ?? 0) != 0
     }
 }
 
@@ -56,5 +58,6 @@ extension AgentTask: PersistableRecord {
             container["terminalState"] = nil
         }
         container["watchMode"] = watchMode.rawValue
+        container["isArchived"] = isArchived ? 1 : 0
     }
 }

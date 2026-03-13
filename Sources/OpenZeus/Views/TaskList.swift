@@ -5,9 +5,15 @@ struct TaskList: View {
     let project: Project
     @Binding var selection: AgentTask?
     @State private var showingNewTask = false
+    @State private var showArchived = false
 
     private var projectTasks: [AgentTask] {
-        appDatabase.tasks(for: project.id)
+        let all = appDatabase.tasks(for: project.id)
+        return showArchived ? all : all.filter { !$0.isArchived }
+    }
+
+    private var hasArchivedTasks: Bool {
+        appDatabase.tasks(for: project.id).contains { $0.isArchived }
     }
 
     var body: some View {
@@ -17,6 +23,7 @@ struct TaskList: View {
                     task: task,
                     isSelected: selection?.id == task.id,
                     onSelect: { selection = task },
+                    onArchive: { archiveTask(task) },
                     onDelete: { deleteTask(task) }
                 )
             }
@@ -29,6 +36,19 @@ struct TaskList: View {
                     .padding(.vertical, 4)
             }
             .buttonStyle(.plain)
+
+            if hasArchivedTasks {
+                Button(action: { showArchived.toggle() }) {
+                    Label(
+                        showArchived ? "Hide Archived" : "Show Archived",
+                        systemImage: showArchived ? "archivebox.fill" : "archivebox"
+                    )
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 4)
+                }
+                .buttonStyle(.plain)
+            }
         }
         .navigationTitle(project.name)
         .sheet(isPresented: $showingNewTask) {
@@ -36,6 +56,13 @@ struct TaskList: View {
                 selection = task
             }
         }
+    }
+
+    private func archiveTask(_ task: AgentTask) {
+        if selection == task { selection = nil }
+        var updated = task
+        updated.isArchived = !task.isArchived
+        appDatabase.updateTask(updated)
     }
 
     private func deleteTask(_ task: AgentTask) {
@@ -116,6 +143,7 @@ private struct TaskRow: View {
     let task: AgentTask
     let isSelected: Bool
     let onSelect: () -> Void
+    let onArchive: () -> Void
     let onDelete: () -> Void
 
     @EnvironmentObject var terminalStore: TerminalStore
@@ -127,7 +155,12 @@ private struct TaskRow: View {
             HStack(alignment: .top) {
                 descriptionText
                 Spacer()
-                if isSelected {
+                if task.isArchived {
+                    Image(systemName: "archivebox.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 2)
+                } else if isSelected {
                     Image(systemName: "terminal.fill")
                         .font(.caption)
                         .foregroundStyle(Color.accentColor)
@@ -148,51 +181,64 @@ private struct TaskRow: View {
                         .foregroundStyle(.orange)
                 }
                 Spacer()
-                Button {
-                    var updated = task
-                    updated.watchMode = task.watchMode.next
-                    appDatabase.updateTask(updated)
-                    terminalStore.updateTaskMetadata(taskID: task.id, name: task.name, watchMode: updated.watchMode)
-                } label: {
-                    Image(systemName: task.watchMode.systemImage)
+                if !task.isArchived {
+                    Button {
+                        var updated = task
+                        updated.watchMode = task.watchMode.next
+                        appDatabase.updateTask(updated)
+                        terminalStore.updateTaskMetadata(taskID: task.id, name: task.name, watchMode: updated.watchMode)
+                    } label: {
+                        Image(systemName: task.watchMode.systemImage)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(task.watchMode == .off ? .secondary : Color.orange)
+                    .help(task.watchMode.label)
+                    Button {
+                        let text = task.taskDescription ?? task.name
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(text, forType: .string)
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(task.watchMode == .off ? .secondary : Color.orange)
-                .help(task.watchMode.label)
-                Button {
-                    let text = task.taskDescription ?? task.name
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(text, forType: .string)
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
                 Button(role: .destructive, action: onDelete) {
                     Image(systemName: "trash")
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.red.opacity(0.7))
-                Button {
-                    showingEdit = true
-                } label: {
-                    Image(systemName: "pencil")
+                if !task.isArchived {
+                    Button {
+                        showingEdit = true
+                    } label: {
+                        Image(systemName: "pencil")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                }
+                Button(action: onArchive) {
+                    Image(systemName: task.isArchived ? "arrow.uturn.backward.circle" : "checkmark.circle")
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                Button(action: onSelect) {
-                    Label("Open Terminal", systemImage: "terminal")
+                .foregroundStyle(task.isArchived ? Color.accentColor : .secondary)
+                .help(task.isArchived ? "Unarchive Task" : "Complete & Archive")
+                if !task.isArchived {
+                    Button(action: onSelect) {
+                        Label("Open Terminal", systemImage: "terminal")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.mini)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.mini)
             }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+        .opacity(task.isArchived ? 0.5 : 1.0)
+        .background(isSelected && !task.isArchived ? Color.accentColor.opacity(0.12) : Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .contentShape(Rectangle())
-        .onTapGesture { onSelect() }
+        .onTapGesture { if !task.isArchived { onSelect() } }
         .sheet(isPresented: $showingEdit) {
             EditTaskSheet(task: task)
         }
@@ -206,6 +252,7 @@ private struct TaskRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(first)
                     .font(.headline)
+                    .strikethrough(task.isArchived)
                 Text(lines.dropFirst().joined(separator: "\n"))
                     .font(.body)
                     .foregroundStyle(.secondary)
@@ -213,6 +260,7 @@ private struct TaskRow: View {
         } else {
             Text(description)
                 .font(.headline)
+                .strikethrough(task.isArchived)
         }
     }
 }
