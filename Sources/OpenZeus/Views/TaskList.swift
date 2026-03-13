@@ -1,15 +1,18 @@
 import SwiftUI
-import SwiftData
 
 struct TaskList: View {
-    @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject var appDatabase: AppDatabase
     let project: Project
     @Binding var selection: AgentTask?
     @State private var showingNewTask = false
 
+    private var projectTasks: [AgentTask] {
+        appDatabase.tasks(for: project.id)
+    }
+
     var body: some View {
         List {
-            ForEach(project.tasks) { task in
+            ForEach(projectTasks) { task in
                 TaskRow(
                     task: task,
                     isSelected: selection?.id == task.id,
@@ -37,16 +40,16 @@ struct TaskList: View {
 
     private func deleteTask(_ task: AgentTask) {
         if selection == task { selection = nil }
-        modelContext.delete(task)
+        appDatabase.deleteTask(id: task.id)
     }
 
     private func deleteTasks(offsets: IndexSet) {
-        for index in offsets { deleteTask(project.tasks[index]) }
+        for index in offsets { deleteTask(projectTasks[index]) }
     }
 }
 
 struct NewTaskSheet: View {
-    @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject var appDatabase: AppDatabase
     @Environment(\.dismiss) private var dismiss
     let project: Project
     var onCreated: (AgentTask) -> Void = { _ in }
@@ -78,18 +81,12 @@ struct NewTaskSheet: View {
                 }
 
             HStack {
-                Button("Discard") {
-                    dismiss()
-                }
-                .keyboardShortcut(.cancelAction)
-
+                Button("Discard") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
                 Spacer()
-
-                Button("Save") {
-                    save()
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("Save") { save() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(24)
@@ -97,16 +94,19 @@ struct NewTaskSheet: View {
     }
 
     private func save() {
-        let lines = text.components(separatedBy: "\n")
-        let title = lines.first?.trimmingCharacters(in: .whitespaces) ?? ""
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = trimmed.components(separatedBy: "\n").first?.trimmingCharacters(in: .whitespaces) ?? trimmed
         let task = AgentTask(
-            name: title.isEmpty ? text.trimmingCharacters(in: .whitespacesAndNewlines) : title,
-            taskDescription: text.trimmingCharacters(in: .whitespacesAndNewlines),
+            id: UUID(),
+            projectID: project.id,
+            name: title.isEmpty ? trimmed : title,
+            taskDescription: trimmed,
             command: ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/bash",
+            environment: [:],
             workingDirectory: project.directoryURL,
-            project: project
+            status: .idle
         )
-        modelContext.insert(task)
+        appDatabase.insertTask(task)
         dismiss()
         onCreated(task)
     }
@@ -172,11 +172,7 @@ private struct TaskRow: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(
-            isSelected
-                ? Color.accentColor.opacity(0.12)
-                : Color.clear
-        )
+        .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .contentShape(Rectangle())
         .onTapGesture { onSelect() }
@@ -205,6 +201,7 @@ private struct TaskRow: View {
 }
 
 private struct EditTaskSheet: View {
+    @EnvironmentObject var appDatabase: AppDatabase
     @Environment(\.dismiss) private var dismiss
     let task: AgentTask
 
@@ -230,18 +227,12 @@ private struct EditTaskSheet: View {
                 )
 
             HStack {
-                Button("Cancel") {
-                    dismiss()
-                }
-                .keyboardShortcut(.cancelAction)
-
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
                 Spacer()
-
-                Button("Save") {
-                    save()
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("Save") { save() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(24)
@@ -250,8 +241,10 @@ private struct EditTaskSheet: View {
 
     private func save() {
         let trimmed = description.trimmingCharacters(in: .whitespacesAndNewlines)
-        task.name = trimmed
-        task.taskDescription = trimmed
+        var updated = task
+        updated.name = trimmed.components(separatedBy: "\n").first?.trimmingCharacters(in: .whitespaces) ?? trimmed
+        updated.taskDescription = trimmed
+        appDatabase.updateTask(updated)
         dismiss()
     }
 }

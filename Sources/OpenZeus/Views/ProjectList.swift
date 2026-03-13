@@ -1,21 +1,20 @@
 import SwiftUI
-import SwiftData
 
 struct ProjectList: View {
-    @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject var appDatabase: AppDatabase
     @EnvironmentObject var terminalStore: TerminalStore
-    let projects: [Project]
     @Binding var selection: Project?
     let activeTask: AgentTask?
 
     var body: some View {
         List(selection: $selection) {
-            ForEach(projects) { project in
+            ForEach(appDatabase.projects) { project in
                 ProjectRow(
                     project: project,
                     activeTask: activeTask,
                     isSelected: selection == project,
-                    hasActiveProcess: project.tasks.contains { terminalStore.activeProcessTaskIDs.contains($0.id) },
+                    hasActiveProcess: appDatabase.tasks(for: project.id)
+                        .contains { terminalStore.activeProcessTaskIDs.contains($0.id) },
                     onRemove: { removeProject(project) }
                 )
                 .tag(project)
@@ -37,21 +36,19 @@ struct ProjectList: View {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
-
         guard panel.runModal() == .OK, let url = panel.url else { return }
-
-        let project = Project(name: url.lastPathComponent, directoryURL: url)
-        modelContext.insert(project)
+        let project = Project(id: UUID(), name: url.lastPathComponent, directoryURL: url)
+        appDatabase.insertProject(project)
         selection = project
     }
 
     private func removeProject(_ project: Project) {
         if selection == project { selection = nil }
-        modelContext.delete(project)
+        appDatabase.deleteProject(id: project.id)
     }
 
     private func deleteProjects(offsets: IndexSet) {
-        for index in offsets { removeProject(projects[index]) }
+        for index in offsets { removeProject(appDatabase.projects[index]) }
     }
 }
 
@@ -78,7 +75,7 @@ private struct ProjectRow: View {
                 .foregroundStyle(isSelected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
                 .lineLimit(1)
                 .truncationMode(.middle)
-            if let task = activeTask, project.tasks.contains(where: { $0.id == task.id }) {
+            if let task = activeTask, task.projectID == project.id {
                 Label(task.name, systemImage: "terminal.fill")
                     .font(.caption2)
                     .foregroundStyle(isSelected ? AnyShapeStyle(.primary) : AnyShapeStyle(Color.accentColor))

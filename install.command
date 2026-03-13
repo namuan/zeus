@@ -1,6 +1,22 @@
 #!/bin/bash
 set -euo pipefail
 
+# Require only Xcode Command Line Tools — full Xcode is NOT needed.
+# Install them with: xcode-select --install
+if ! command -v swift >/dev/null 2>&1; then
+  echo "Error: 'swift' not found."
+  echo "Install Xcode Command Line Tools (no full Xcode needed):"
+  echo "  xcode-select --install"
+  exit 1
+fi
+
+# Ensure the active developer directory is set (CLT or Xcode either works).
+if ! xcode-select -p >/dev/null 2>&1; then
+  echo "Error: No active developer directory found."
+  echo "Run: xcode-select --install"
+  exit 1
+fi
+
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="OpenZeus"
 DERIVED="$ROOT/.build"
