@@ -27,28 +27,6 @@ struct TaskList: View {
             }
             .buttonStyle(.plain)
         }
-        .safeAreaInset(edge: .bottom) {
-            if let task = selection {
-                HStack(spacing: 6) {
-                    Image(systemName: "terminal.fill")
-                        .foregroundStyle(Color.accentColor)
-                    Group {
-                        if let projectName = task.project?.name {
-                            Text(projectName).bold() + Text("  ›  \(task.name)")
-                        } else {
-                            Text(task.name)
-                        }
-                    }
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                }
-                .font(.caption)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.bar)
-            }
-        }
         .navigationTitle(project.name)
         .sheet(isPresented: $showingNewTask) {
             NewTaskSheet(project: project) { task in
