@@ -5,6 +5,7 @@ import SwiftTerm
 final class TerminalEntry: ObservableObject {
     let terminalView: LocalProcessTerminalView
     @Published var isRunning = false
+    @Published var tmuxUnavailable = false
     // Held strongly so process events arrive even when the terminal is hidden
     private let delegate: TerminalEntryDelegate
 

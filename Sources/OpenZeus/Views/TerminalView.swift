@@ -20,9 +20,15 @@ private struct TerminalPaneContent: View {
                 Text(task.name)
                     .font(.headline)
                 Spacer()
-                Text(entry.isRunning ? "Running" : "Stopped")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if entry.tmuxUnavailable {
+                    Label("tmux not found — sessions won't persist", systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                } else {
+                    Text(entry.isRunning ? "Running" : "Stopped")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             .padding()
             .background(.bar)
@@ -60,17 +66,42 @@ private struct TerminalRepresentable: NSViewRepresentable {
         }
 
         guard terminalView.process?.running != true else { return }
+
         let shell = task.command.isEmpty
             ? (ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/bash")
             : task.command
-        terminalView.startProcess(
-            executable: shell,
-            args: ["-l"],
-            currentDirectory: task.workingDirectory.path(percentEncoded: false)
-        )
+        let cwd = task.workingDirectory.path(percentEncoded: false)
+
+        if let tmux = tmuxExecutable() {
+            let sessionName = "zeus-\(task.id.uuidString)"
+            // -A: attach to existing session if present, otherwise create
+            // Providing the shell ensures new sessions start with the user's shell
+            terminalView.startProcess(
+                executable: tmux,
+                args: ["new-session", "-A", "-s", sessionName, shell, "-l"],
+                currentDirectory: cwd
+            )
+        } else {
+            entry.tmuxUnavailable = true
+            terminalView.startProcess(
+                executable: shell,
+                args: ["-l"],
+                currentDirectory: cwd
+            )
+        }
+
         entry.isRunning = true
         DispatchQueue.main.async {
             terminalView.window?.makeFirstResponder(terminalView)
         }
     }
+}
+
+private func tmuxExecutable() -> String? {
+    let candidates = [
+        "/opt/homebrew/bin/tmux", // Apple Silicon Homebrew
+        "/usr/local/bin/tmux",    // Intel Homebrew
+        "/usr/bin/tmux",
+    ]
+    return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
 }
