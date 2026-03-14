@@ -146,8 +146,8 @@ private struct WindowControlBar: View {
             .help("Quick Commands")
             .popover(isPresented: $showCommands) {
                 QuickCommandsPopover(projectID: projectID) { command in
-                    logInfo("WindowControlBar: quick command '\(command)' sent")
-                    entry.sendCommand(command, inNewVerticalPane: true)
+                    logInfo("WindowControlBar: quick command '\(command)' sent, hasActiveProcess=\(entry.hasActiveProcess)")
+                    entry.sendCommand(command, inNewVerticalPane: entry.hasActiveProcess)
                     showCommands = false
                 }
                 .environmentObject(db)

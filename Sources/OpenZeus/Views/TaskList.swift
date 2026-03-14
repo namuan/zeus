@@ -64,9 +64,7 @@ struct TaskList: View {
         }
         .navigationTitle(project.name)
         .sheet(isPresented: $showingNewTask) {
-            NewTaskSheet(project: project) { task in
-                selection = task
-            }
+            NewTaskSheet(project: project)
         }
     }
 
@@ -80,6 +78,7 @@ struct TaskList: View {
 
     private func deleteTask(_ task: AgentTask) {
         if selection == task { selection = nil }
+        terminalStore.killSession(for: task.id)
         appDatabase.deleteTask(id: task.id)
     }
 
