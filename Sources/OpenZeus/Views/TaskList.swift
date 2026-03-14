@@ -124,7 +124,7 @@ struct NewTaskSheet: View {
                     .keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Save") { save() }
-                    .keyboardShortcut(.defaultAction)
+                    .keyboardShortcut(.return, modifiers: .command)
                     .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
@@ -235,13 +235,6 @@ private struct TaskRow: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(task.isArchived ? Color.accentColor : .secondary)
                 .help(task.isArchived ? "Unarchive Task" : "Complete & Archive")
-                if !task.isArchived {
-                    Button(action: onSelect) {
-                        Label("Open Terminal", systemImage: "terminal")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.mini)
-                }
             }
         }
         .padding(.horizontal, 10)
@@ -308,7 +301,7 @@ private struct EditTaskSheet: View {
                     .keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Save") { save() }
-                    .keyboardShortcut(.defaultAction)
+                    .keyboardShortcut(.return, modifiers: .command)
                     .disabled(description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
