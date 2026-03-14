@@ -40,7 +40,7 @@ struct QuickCommandsPopover: View {
                         }
                     }
                 }
-                .frame(maxHeight: 380)
+                .frame(maxHeight: 520)
             }
 
             Divider()
@@ -64,6 +64,7 @@ struct QuickCommandsPopover: View {
             .padding(10)
         }
         .frame(width: 440)
+        .frame(minHeight: 420)
         .onAppear {
             addFieldFocused = commands.isEmpty
         }
