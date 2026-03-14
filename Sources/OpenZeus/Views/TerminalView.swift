@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftTerm
+import UniformTypeIdentifiers
 
 struct TerminalPane: View {
     let task: AgentTask
@@ -34,6 +35,8 @@ private struct TerminalPaneContent: View {
                 WindowControlBar(entry: entry, projectID: task.projectID, workingDirectory: task.workingDirectory.path(percentEncoded: false))
                 Divider()
             }
+            AppLauncherBar(projectID: task.projectID, workingDirectory: task.workingDirectory.path(percentEncoded: false))
+            Divider()
             if entry.tmuxUnavailable {
                 Label("tmux not found — sessions won't persist", systemImage: "exclamationmark.triangle")
                     .font(.caption)
@@ -324,6 +327,99 @@ private struct WindowControlBar: View {
                 Text("This will discard all staged, unstaged, and untracked changes. This cannot be undone.")
             }
         }
+    }
+}
+
+// MARK: - App Launcher Bar
+
+private struct AppLauncherBar: View {
+    let projectID: UUID
+    let workingDirectory: String
+    @EnvironmentObject var db: AppDatabase
+
+    private var apps: [ProjectApp] {
+        db.projectApps(for: projectID)
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(apps) { app in
+                AppLauncherButton(app: app, workingDirectory: workingDirectory)
+                    .contextMenu {
+                        Button("Remove \(app.displayName)", role: .destructive) {
+                            db.deleteProjectApp(id: app.id)
+                        }
+                    }
+            }
+            Button {
+                addApp()
+            } label: {
+                Image(systemName: "plus")
+                    .font(.caption)
+            }
+            .help("Add Application")
+
+            Spacer()
+        }
+        .buttonStyle(.borderless)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 3)
+        .background(.bar)
+    }
+
+    private func addApp() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [.applicationBundle]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.message = "Choose an application to open with this project"
+        panel.prompt = "Add"
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let displayName = url.deletingPathExtension().lastPathComponent
+        let app = ProjectApp(
+            id: UUID(),
+            projectID: projectID,
+            appPath: url.path,
+            displayName: displayName
+        )
+        db.insertProjectApp(app)
+    }
+}
+
+private struct AppLauncherButton: View {
+    let app: ProjectApp
+    let workingDirectory: String
+
+    private var icon: NSImage {
+        NSWorkspace.shared.icon(forFile: app.appPath)
+    }
+
+    var body: some View {
+        Button {
+            let appURL = URL(fileURLWithPath: app.appPath)
+            let dirURL = URL(fileURLWithPath: workingDirectory)
+            NSWorkspace.shared.open(
+                [dirURL],
+                withApplicationAt: appURL,
+                configuration: NSWorkspace.OpenConfiguration()
+            ) { _, _ in }
+        } label: {
+            HStack(spacing: 3) {
+                Image(nsImage: icon)
+                    .resizable()
+                    .frame(width: 14, height: 14)
+                Text(app.displayName)
+                    .font(.caption)
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color.primary.opacity(0.07))
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+        }
+        .help("Open \(app.displayName)")
     }
 }
 

@@ -8,6 +8,7 @@ final class AppDatabase: ObservableObject {
     @Published private(set) var projects: [Project] = []
     @Published private(set) var tasks: [AgentTask] = []
     @Published private(set) var savedCommands: [SavedCommand] = []
+    @Published private(set) var projectApps: [ProjectApp] = []
 
     private var cancellables: [AnyDatabaseCancellable] = []
 
@@ -90,6 +91,14 @@ final class AppDatabase: ObservableObject {
             try db.drop(table: "savedCommands")
             try db.rename(table: "savedCommands_v2", to: "savedCommands")
         }
+        migrator.registerMigration("v6") { db in
+            try db.create(table: "projectApps") { t in
+                t.primaryKey("id", .text)
+                t.column("projectId", .text).references("projects", onDelete: .cascade)
+                t.column("appPath", .text).notNull()
+                t.column("displayName", .text).notNull()
+            }
+        }
         try migrator.migrate(db)
     }
 
@@ -115,6 +124,13 @@ final class AppDatabase: ObservableObject {
                 .tracking { db in try SavedCommand.fetchAll(db) }
                 .start(in: dbQueue, scheduling: .immediate, onError: { _ in }, onChange: { [weak self] in
                     self?.savedCommands = $0
+                })
+        )
+        cancellables.append(
+            ValueObservation
+                .tracking { db in try ProjectApp.fetchAll(db) }
+                .start(in: dbQueue, scheduling: .immediate, onError: { _ in }, onChange: { [weak self] in
+                    self?.projectApps = $0
                 })
         )
     }
@@ -152,6 +168,22 @@ final class AppDatabase: ObservableObject {
     func deleteTask(id: UUID) {
         try? dbQueue.write { db in
             try db.execute(sql: "DELETE FROM tasks WHERE id = ?", arguments: [id.uuidString])
+        }
+    }
+
+    // MARK: - Project Apps
+
+    func projectApps(for projectID: UUID) -> [ProjectApp] {
+        projectApps.filter { $0.projectID == projectID }
+    }
+
+    func insertProjectApp(_ app: ProjectApp) {
+        try? dbQueue.write { db in try app.insert(db) }
+    }
+
+    func deleteProjectApp(id: UUID) {
+        try? dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM projectApps WHERE id = ?", arguments: [id.uuidString])
         }
     }
 
