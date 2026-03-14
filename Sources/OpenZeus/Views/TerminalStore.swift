@@ -34,6 +34,9 @@ final class TerminalEntry: ObservableObject {
     @Published var paneCount: Int = 1 {
         didSet { logDebug("paneCount changed: \(paneCount)") }
     }
+    @Published var mouseReportingEnabled: Bool = true {
+        didSet { logDebug("mouseReportingEnabled changed: \(mouseReportingEnabled)") }
+    }
     var workingDirectory: String = "" {
         didSet { logDebug("workingDirectory changed: '\(workingDirectory)'") }
     }
@@ -427,6 +430,13 @@ final class TerminalStore: ObservableObject {
     // Per-task metadata needed to fire notifications without a DB lookup
     private var taskMetadata: [UUID: (name: String, watchMode: WatchMode)] = [:]
     private let notifier = ActivityNotifier()
+    nonisolated(unsafe) private var optionKeyMonitor: Any?
+
+    deinit {
+        if let monitor = optionKeyMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+    }
 
     func entry(for id: UUID) -> TerminalEntry {
         logInfo("TerminalStore.entry(for: \(id.uuidString)) - entries count=\(entries.count)")
@@ -435,6 +445,7 @@ final class TerminalStore: ObservableObject {
             return existing
         }
         logInfo("TerminalStore: creating new TerminalEntry")
+        installOptionKeyMonitor()
         let entry = TerminalEntry(taskID: id)
         entries[id] = entry
         entry.$hasActiveProcess
@@ -467,6 +478,25 @@ final class TerminalStore: ObservableObject {
         logInfo("TerminalStore.updateTaskMetadata: task=\(taskID.uuidString), name='\(name)', watchMode=\(watchMode), cwd='\(workingDirectory)'")
         taskMetadata[taskID] = (name: name, watchMode: watchMode)
         entries[taskID]?.workingDirectory = workingDirectory
+    }
+
+    private func installOptionKeyMonitor() {
+        guard optionKeyMonitor == nil else { return }
+        logInfo("Installing Option key monitor for text selection")
+        optionKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            guard let self else { return event }
+            let optionHeld = event.modifierFlags.contains(.option)
+            logDebug("Option key flagsChanged: optionHeld=\(optionHeld)")
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let newValue = !optionHeld
+                logDebug("Setting mouseReportingEnabled=\(newValue) on \(entries.count) entries")
+                for entry in entries.values where entry.mouseReportingEnabled != newValue {
+                    entry.mouseReportingEnabled = newValue
+                }
+            }
+            return event
+        }
     }
 
     /// Kill the tmux session for a task and remove it from the cache.

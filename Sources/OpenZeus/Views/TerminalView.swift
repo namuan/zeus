@@ -458,6 +458,7 @@ private class TerminalContainerView: NSView {
     var sessionName: String?
     nonisolated(unsafe) private var scrollAccumulator: CGFloat = 0
     nonisolated(unsafe) private var scrollTimer: Timer?
+    nonisolated(unsafe) private var didSelectionDrag = false
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         bounds.contains(point) ? self : nil
@@ -466,11 +467,22 @@ private class TerminalContainerView: NSView {
     override var acceptsFirstResponder: Bool { false }
 
     override func mouseDown(with event: NSEvent) {
+        didSelectionDrag = false
         window?.makeFirstResponder(subviews.first)
         subviews.first?.mouseDown(with: event)
     }
-    override func mouseUp(with event: NSEvent) { subviews.first?.mouseUp(with: event) }
-    override func mouseDragged(with event: NSEvent) { subviews.first?.mouseDragged(with: event) }
+    override func mouseUp(with event: NSEvent) {
+        subviews.first?.mouseUp(with: event)
+        if didSelectionDrag, let terminalView = subviews.first as? TerminalView {
+            logInfo("Auto-copying terminal selection to clipboard")
+            terminalView.copy(self)
+        }
+        didSelectionDrag = false
+    }
+    override func mouseDragged(with event: NSEvent) {
+        didSelectionDrag = true
+        subviews.first?.mouseDragged(with: event)
+    }
     override func rightMouseDown(with event: NSEvent) { subviews.first?.rightMouseDown(with: event) }
     override func rightMouseUp(with event: NSEvent) { subviews.first?.rightMouseUp(with: event) }
     override func otherMouseDown(with event: NSEvent) { subviews.first?.otherMouseDown(with: event) }
@@ -506,7 +518,7 @@ private struct TerminalRepresentable: NSViewRepresentable {
     let sessionID: UUID
     let command: String
     let workingDirectory: String
-    let entry: TerminalEntry
+    @ObservedObject var entry: TerminalEntry
 
     func makeNSView(context: Context) -> TerminalContainerView {
         logInfo("TerminalRepresentable.makeNSView: creating TerminalContainerView for session \(sessionID)")
@@ -529,6 +541,9 @@ private struct TerminalRepresentable: NSViewRepresentable {
                 terminalView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             ])
         }
+
+        logDebug("Syncing allowMouseReporting=\(entry.mouseReportingEnabled)")
+        terminalView.allowMouseReporting = entry.mouseReportingEnabled
 
         if terminalView.process?.running == true {
             if let sessionName = container.sessionName, let tmux = tmuxExecutable() {
