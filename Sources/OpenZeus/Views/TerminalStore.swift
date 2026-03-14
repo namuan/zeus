@@ -12,14 +12,31 @@ final class TerminalEntry: ObservableObject {
     let taskID: UUID
     let terminalView: LocalProcessTerminalView
     @Published var isRunning = false {
-        didSet { isRunning ? startPolling() : stopPolling() }
+        didSet {
+            logInfo("isRunning changed: \(isRunning)")
+            isRunning ? startPolling() : stopPolling()
+        }
     }
-    @Published var hasActiveProcess = false
-    @Published var tmuxUnavailable = false
-    @Published var windows: [TmuxWindow] = []
-    @Published var currentWindowIndex: Int = 0
-    @Published var paneCount: Int = 1
-    var workingDirectory: String = ""
+    @Published var hasActiveProcess = false {
+        didSet { logDebug("hasActiveProcess changed: \(hasActiveProcess)") }
+    }
+    @Published var tmuxUnavailable = false {
+        didSet { logInfo("tmuxUnavailable changed: \(tmuxUnavailable)") }
+    }
+    @Published var windows: [TmuxWindow] = [] {
+        didSet {
+            logInfo("windows changed: count=\(windows.count), windows=\(windows.map { "\($0.index):\($0.name)" })")
+        }
+    }
+    @Published var currentWindowIndex: Int = 0 {
+        didSet { logDebug("currentWindowIndex changed: \(currentWindowIndex)") }
+    }
+    @Published var paneCount: Int = 1 {
+        didSet { logDebug("paneCount changed: \(paneCount)") }
+    }
+    var workingDirectory: String = "" {
+        didSet { logDebug("workingDirectory changed: '\(workingDirectory)'") }
+    }
 
     private let delegate: TerminalEntryDelegate
     private var pollTimer: Timer?
@@ -31,6 +48,7 @@ final class TerminalEntry: ObservableObject {
 
     init(taskID: UUID) {
         self.taskID = taskID
+        logInfo("TerminalEntry created for task \(taskID.uuidString)")
         terminalView = LocalProcessTerminalView(frame: .zero)
         terminalView.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         let d = TerminalEntryDelegate()
@@ -40,7 +58,11 @@ final class TerminalEntry: ObservableObject {
     }
 
     private func startPolling() {
-        guard pollTimer == nil else { return }
+        guard pollTimer == nil else {
+            logDebug("startPolling: already polling, skipping")
+            return
+        }
+        logInfo("startPolling: beginning 2-second polling cycle")
         Task { await checkActiveProcess() }  // immediate check on start
         pollTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             guard let self else { return }
@@ -49,186 +71,329 @@ final class TerminalEntry: ObservableObject {
     }
 
     private func stopPolling() {
+        logInfo("stopPolling: stopping poll timer")
         pollTimer?.invalidate()
         pollTimer = nil
         hasActiveProcess = false
     }
 
     private func checkActiveProcess() async {
-        guard let tmux = tmuxExecutable() else { return }
         let sessionName = "zeus-\(taskID.uuidString)"
+        logDebug("checkActiveProcess: starting for session \(sessionName)")
+
+        guard let tmux = tmuxExecutable() else {
+            logWarning("checkActiveProcess: tmux executable not found")
+            return
+        }
+        logDebug("checkActiveProcess: using tmux at \(tmux)")
+
         async let commandFuture = runProcessOutput(tmux, args: [
             "display-message", "-p", "-t", sessionName, "#{pane_current_command}",
         ])
         async let windowsFuture = runProcessOutput(tmux, args: [
             "list-windows", "-t", sessionName, "-F",
-            "#{window_index}\t#{window_name}\t#{window_active}",
+            "#{window_index}|#{window_name}|#{window_active}",
         ])
         async let panesFuture = runProcessOutput(tmux, args: [
             "list-panes", "-t", sessionName,
         ])
         let (commandOutput, windowsOutput, panesOutput) = await (commandFuture, windowsFuture, panesFuture)
+
+        logDebug("checkActiveProcess: commandOutput='\(commandOutput)'")
+        logDebug("checkActiveProcess: windowsOutput='\(windowsOutput)'")
+        logDebug("checkActiveProcess: panesOutput='\(panesOutput)'")
+
         let command = commandOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let wasActive = hasActiveProcess
         hasActiveProcess = !command.isEmpty && !Self.knownShells.contains(command)
+        logDebug("checkActiveProcess: command='\(command)', hasActiveProcess=\(hasActiveProcess) (was \(wasActive))")
+
         parseWindowState(windowsOutput)
+
         let count = panesOutput.split(separator: "\n").filter { !$0.isEmpty }.count
         paneCount = max(1, count)
+        logDebug("checkActiveProcess: pane count updated to \(paneCount)")
     }
 
     private func parseWindowState(_ output: String) {
+        logDebug("parseWindowState: input length=\(output.count), raw='\(output)'")
         let lines = output
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .split(separator: "\n")
             .map(String.init)
             .filter { !$0.isEmpty }
+        logDebug("parseWindowState: \(lines.count) lines after splitting")
+
+        if lines.isEmpty {
+            logWarning("parseWindowState: no lines to parse - tmux session may not exist or be stale")
+            return
+        }
+
         var wins: [TmuxWindow] = []
         var activeIdx = 0
-        for line in lines {
-            let parts = line.split(separator: "\t", maxSplits: 2).map(String.init)
-            guard parts.count == 3, let idx = Int(parts[0]) else { continue }
+        for (lineNum, line) in lines.enumerated() {
+            let parts = line.split(separator: "|", maxSplits: 2).map(String.init)
+            logDebug("parseWindowState: line \(lineNum): '\(line)' -> \(parts.count) parts: \(parts)")
+            guard parts.count == 3, let idx = Int(parts[0]) else {
+                logWarning("parseWindowState: SKIPPED line \(lineNum) - expected 3 pipe-separated parts with numeric index, got \(parts.count) parts")
+                continue
+            }
             wins.append(TmuxWindow(index: idx, name: parts[1]))
             if parts[2].trimmingCharacters(in: .whitespacesAndNewlines) == "1" {
                 activeIdx = idx
+                logDebug("parseWindowState: window \(idx) (\(parts[1])) is active")
             }
         }
+
+        logInfo("parseWindowState: parsed \(wins.count) windows, active=\(activeIdx), previous count=\(windows.count)")
         if !wins.isEmpty {
             windows = wins
             currentWindowIndex = activeIdx
+            logInfo("parseWindowState: UPDATED windows array - now \(windows.count) windows")
+        } else {
+            logWarning("parseWindowState: NO UPDATE - all lines failed to parse, windows still at \(windows.count)")
         }
     }
 
     // MARK: - Tmux window control
 
     func openWindow() {
-        guard let tmux = tmuxExecutable() else { return }
         let sessionName = "zeus-\(taskID.uuidString)"
+        logInfo("openWindow: requested for session \(sessionName), current windows count=\(windows.count)")
+
+        guard let tmux = tmuxExecutable() else {
+            logError("openWindow: tmux executable not found")
+            return
+        }
+
         var args = ["new-window", "-t", sessionName]
         if !workingDirectory.isEmpty {
             args += ["-c", workingDirectory]
+            logDebug("openWindow: using working directory '\(workingDirectory)'")
         }
+        logInfo("openWindow: executing \(tmux) \(args.joined(separator: " "))")
+
         Task {
-            await runProcessOutput(tmux, args: args)
+            let output = await runProcessOutput(tmux, args: args)
+            logInfo("openWindow: tmux new-window completed, output='\(output)'")
+
+            logDebug("openWindow: waiting 200ms for tmux to settle...")
             try? await Task.sleep(nanoseconds: 200_000_000)
+
+            logDebug("openWindow: calling checkActiveProcess to refresh state")
             await checkActiveProcess()
+
+            logInfo("openWindow: completed - windows now count=\(windows.count), names=\(windows.map { $0.name })")
         }
     }
 
     func nextWindow() {
-        guard let tmux = tmuxExecutable() else { return }
         let sessionName = "zeus-\(taskID.uuidString)"
+        logInfo("nextWindow: requested for session \(sessionName), current index=\(currentWindowIndex), windows=\(windows.count)")
+
+        guard let tmux = tmuxExecutable() else {
+            logError("nextWindow: tmux executable not found")
+            return
+        }
+
         Task {
-            await runProcessOutput(tmux, args: ["next-window", "-t", sessionName])
+            logDebug("nextWindow: executing tmux next-window")
+            let output = await runProcessOutput(tmux, args: ["next-window", "-t", sessionName])
+            logDebug("nextWindow: tmux output='\(output)'")
+
+            logDebug("nextWindow: waiting 200ms...")
             try? await Task.sleep(nanoseconds: 200_000_000)
+
+            logDebug("nextWindow: refreshing state")
             await checkActiveProcess()
+            logInfo("nextWindow: completed - now at index=\(currentWindowIndex)")
         }
     }
 
     func previousWindow() {
-        guard let tmux = tmuxExecutable() else { return }
         let sessionName = "zeus-\(taskID.uuidString)"
+        logInfo("previousWindow: requested for session \(sessionName), current index=\(currentWindowIndex), windows=\(windows.count)")
+
+        guard let tmux = tmuxExecutable() else {
+            logError("previousWindow: tmux executable not found")
+            return
+        }
+
         Task {
-            await runProcessOutput(tmux, args: ["previous-window", "-t", sessionName])
+            logDebug("previousWindow: executing tmux previous-window")
+            let output = await runProcessOutput(tmux, args: ["previous-window", "-t", sessionName])
+            logDebug("previousWindow: tmux output='\(output)'")
+
+            logDebug("previousWindow: waiting 200ms...")
             try? await Task.sleep(nanoseconds: 200_000_000)
+
+            logDebug("previousWindow: refreshing state")
             await checkActiveProcess()
+            logInfo("previousWindow: completed - now at index=\(currentWindowIndex)")
         }
     }
 
     func splitHorizontal() {
+        logInfo("splitHorizontal: requested")
         splitPane(direction: "-h")
     }
 
     func splitVertical() {
+        logInfo("splitVertical: requested")
         splitPane(direction: "-v")
     }
 
     private func splitPane(direction: String) {
-        guard let tmux = tmuxExecutable() else { return }
         let sessionName = "zeus-\(taskID.uuidString)"
+        logInfo("splitPane: direction=\(direction), session=\(sessionName)")
+
+        guard let tmux = tmuxExecutable() else {
+            logError("splitPane: tmux executable not found")
+            return
+        }
+
         var args = ["split-window", direction, "-t", sessionName]
         if !workingDirectory.isEmpty {
             args += ["-c", workingDirectory]
         }
+        logDebug("splitPane: executing \(tmux) \(args.joined(separator: " "))")
+
         Task {
-            await runProcessOutput(tmux, args: args)
+            let output = await runProcessOutput(tmux, args: args)
+            logDebug("splitPane: tmux output='\(output)'")
+
             try? await Task.sleep(nanoseconds: 200_000_000)
             await checkActiveProcess()
+            logInfo("splitPane: completed - pane count now \(paneCount)")
         }
     }
 
     func rotatePane() {
-        guard let tmux = tmuxExecutable() else { return }
         let sessionName = "zeus-\(taskID.uuidString)"
+        logInfo("rotatePane: requested for session \(sessionName), pane count=\(paneCount)")
+
+        guard let tmux = tmuxExecutable() else {
+            logError("rotatePane: tmux executable not found")
+            return
+        }
+
         Task {
-            await runProcessOutput(tmux, args: ["select-pane", "-t", "\(sessionName):.+"])
+            logDebug("rotatePane: executing tmux select-pane")
+            let output = await runProcessOutput(tmux, args: ["select-pane", "-t", "\(sessionName):.+"])
+            logDebug("rotatePane: tmux output='\(output)'")
+
             try? await Task.sleep(nanoseconds: 200_000_000)
             await checkActiveProcess()
+            logInfo("rotatePane: completed")
         }
     }
 
     func closeWindow() {
-        guard let tmux = tmuxExecutable() else { return }
         let sessionName = "zeus-\(taskID.uuidString)"
+        logInfo("closeWindow: requested for session \(sessionName), windows count=\(windows.count)")
+
+        guard let tmux = tmuxExecutable() else {
+            logError("closeWindow: tmux executable not found")
+            return
+        }
+
         Task {
-            await runProcessOutput(tmux, args: ["kill-window", "-t", sessionName])
+            logDebug("closeWindow: executing tmux kill-window")
+            let output = await runProcessOutput(tmux, args: ["kill-window", "-t", sessionName])
+            logDebug("closeWindow: tmux output='\(output)'")
+
             try? await Task.sleep(nanoseconds: 200_000_000)
             await checkActiveProcess()
+            logInfo("closeWindow: completed - windows now count=\(windows.count)")
         }
     }
 
     func selectWindow(index: Int) {
-        guard let tmux = tmuxExecutable() else { return }
         let sessionName = "zeus-\(taskID.uuidString)"
+        logInfo("selectWindow: requested index=\(index), current=\(currentWindowIndex)")
+
+        guard let tmux = tmuxExecutable() else {
+            logError("selectWindow: tmux executable not found")
+            return
+        }
+
         Task {
-            await runProcessOutput(tmux, args: ["select-window", "-t", "\(sessionName):\(index)"])
+            logDebug("selectWindow: executing tmux select-window \(sessionName):\(index)")
+            let output = await runProcessOutput(tmux, args: ["select-window", "-t", "\(sessionName):\(index)"])
+            logDebug("selectWindow: tmux output='\(output)'")
+
             try? await Task.sleep(nanoseconds: 200_000_000)
             await checkActiveProcess()
+            logInfo("selectWindow: completed - now at index=\(currentWindowIndex)")
         }
     }
 
     func sendCommand(_ command: String, inNewVerticalPane: Bool = false) {
+        logInfo("sendCommand: '\(command)', inNewVerticalPane=\(inNewVerticalPane), tmuxUnavailable=\(tmuxUnavailable)")
+
         if !tmuxUnavailable, let tmux = tmuxExecutable() {
             let sessionName = "zeus-\(taskID.uuidString)"
             Task {
-                let target = inNewVerticalPane
-                    ? await createVerticalPane(using: tmux, sessionName: sessionName)
-                    : sessionName
+                let target: String
+                if inNewVerticalPane {
+                    logDebug("sendCommand: creating vertical pane for command")
+                    target = await createVerticalPane(using: tmux, sessionName: sessionName)
+                    logDebug("sendCommand: new pane target=\(target)")
+                } else {
+                    target = sessionName
+                }
+                logDebug("sendCommand: sending to target=\(target)")
                 await runProcessOutput(tmux, args: ["send-keys", "-t", target, command, "Enter"])
+
                 try? await Task.sleep(nanoseconds: 200_000_000)
                 await checkActiveProcess()
+                logInfo("sendCommand: completed via tmux")
             }
         } else {
+            logDebug("sendCommand: sending directly to terminal view (no tmux)")
             let bytes = Array((command + "\n").utf8)
             terminalView.send(data: bytes[...])
+            logInfo("sendCommand: completed via direct PTY write")
         }
     }
 
     private func createVerticalPane(using tmux: String, sessionName: String) async -> String {
+        logDebug("createVerticalPane: session=\(sessionName)")
         var args = ["split-window", "-h", "-P", "-F", "#{pane_id}", "-t", sessionName]
         if !workingDirectory.isEmpty {
             args += ["-c", workingDirectory]
         }
         let output = await runProcessOutput(tmux, args: args)
         let paneID = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        logDebug("createVerticalPane: pane_id='\(paneID)'")
         return paneID.isEmpty ? sessionName : paneID
     }
 }
 
 @discardableResult
 nonisolated func runProcessOutput(_ executable: String, args: [String]) async -> String {
-    await withCheckedContinuation { continuation in
+    logDebug("runProcessOutput: \(executable) \(args.joined(separator: " "))")
+    return await withCheckedContinuation { continuation in
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = args
         let pipe = Pipe()
+        let errorPipe = Pipe()
         process.standardOutput = pipe
-        process.standardError = Pipe()
-        process.terminationHandler = { _ in
+        process.standardError = errorPipe
+        process.terminationHandler = { p in
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            continuation.resume(returning: String(data: data, encoding: .utf8) ?? "")
+            let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+            let output = String(data: data, encoding: .utf8) ?? ""
+            let stderr = String(data: errorData, encoding: .utf8) ?? ""
+            logDebug("runProcessOutput: terminated with status \(p.terminationStatus), stdout='\(output)', stderr='\(stderr)'")
+            continuation.resume(returning: output)
         }
         do {
             try process.run()
+            logDebug("runProcessOutput: process started, pid=\(process.processIdentifier)")
         } catch {
+            logError("runProcessOutput: failed to start process: \(error)")
             continuation.resume(returning: "")
         }
     }
@@ -237,10 +402,17 @@ nonisolated func runProcessOutput(_ executable: String, args: [String]) async ->
 private final class TerminalEntryDelegate: NSObject, LocalProcessTerminalViewDelegate, @unchecked Sendable {
     weak var entry: TerminalEntry?
 
-    func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
-    func setTerminalTitle(source: LocalProcessTerminalView, title: String) {}
-    func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
+    func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {
+        logDebug("TerminalEntryDelegate: size changed to \(newCols)x\(newRows)")
+    }
+    func setTerminalTitle(source: LocalProcessTerminalView, title: String) {
+        logDebug("TerminalEntryDelegate: title changed to '\(title)'")
+    }
+    func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
+        logDebug("TerminalEntryDelegate: directory updated to '\(directory ?? "nil")'")
+    }
     func processTerminated(source: TerminalView, exitCode: Int32?) {
+        logInfo("TerminalEntryDelegate: process terminated with exitCode=\(exitCode.map { String($0) } ?? "nil")")
         DispatchQueue.main.async { self.entry?.isRunning = false }
     }
 }
@@ -257,7 +429,12 @@ final class TerminalStore: ObservableObject {
     private let notifier = ActivityNotifier()
 
     func entry(for id: UUID) -> TerminalEntry {
-        if let existing = entries[id] { return existing }
+        logInfo("TerminalStore.entry(for: \(id.uuidString)) - entries count=\(entries.count)")
+        if let existing = entries[id] {
+            logDebug("TerminalStore: returning existing entry")
+            return existing
+        }
+        logInfo("TerminalStore: creating new TerminalEntry")
         let entry = TerminalEntry(taskID: id)
         entries[id] = entry
         entry.$hasActiveProcess
@@ -267,12 +444,15 @@ final class TerminalStore: ObservableObject {
             .sink { [weak self, id] pair in
                 guard let self else { return }
                 let (wasActive, isActive) = pair
+                logDebug("TerminalStore: hasActiveProcess sink - wasActive=\(wasActive), isActive=\(isActive)")
                 if isActive {
                     self.activeProcessTaskIDs.insert(id)
+                    logInfo("TerminalStore: task \(id.uuidString) became active")
                 } else {
                     self.activeProcessTaskIDs.remove(id)
                     // Transition active → idle: fire alert if watch mode is on
                     if wasActive, let meta = self.taskMetadata[id], meta.watchMode != .off {
+                        logInfo("TerminalStore: task \(id.uuidString) transitioned active→idle, firing notification")
                         self.attentionTaskIDs.insert(id)
                         self.notifier.notify(taskName: meta.name, watchMode: meta.watchMode)
                     }
@@ -284,19 +464,24 @@ final class TerminalStore: ObservableObject {
 
     /// Update cached metadata for a task (call when the task's terminal opens or watch mode changes).
     func updateTaskMetadata(taskID: UUID, name: String, watchMode: WatchMode, workingDirectory: String = "") {
+        logInfo("TerminalStore.updateTaskMetadata: task=\(taskID.uuidString), name='\(name)', watchMode=\(watchMode), cwd='\(workingDirectory)'")
         taskMetadata[taskID] = (name: name, watchMode: watchMode)
         entries[taskID]?.workingDirectory = workingDirectory
     }
 
     /// Kill the tmux session for a task and remove it from the cache.
     func killSession(for taskID: UUID) {
+        logInfo("TerminalStore.killSession: task=\(taskID.uuidString)")
         entries[taskID]?.isRunning = false
         entries.removeValue(forKey: taskID)
         if let tmux = tmuxExecutable() {
             let sessionName = "zeus-\(taskID.uuidString)"
+            logDebug("TerminalStore.killSession: killing tmux session \(sessionName)")
             Task {
                 await runProcessOutput(tmux, args: ["kill-session", "-t", sessionName])
             }
+        } else {
+            logWarning("TerminalStore.killSession: tmux not found, skipping session kill")
         }
         activeProcessTaskIDs.remove(taskID)
         attentionTaskIDs.remove(taskID)
@@ -304,6 +489,7 @@ final class TerminalStore: ObservableObject {
 
     /// Clear the attention state when the user opens the task's terminal.
     func clearAttention(taskID: UUID) {
+        logDebug("TerminalStore.clearAttention: task=\(taskID.uuidString)")
         attentionTaskIDs.remove(taskID)
     }
 }
@@ -314,5 +500,7 @@ func tmuxExecutable() -> String? {
         "/usr/local/bin/tmux",
         "/usr/bin/tmux",
     ]
-    return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+    let found = candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+    logDebug("tmuxExecutable: found=\(found ?? "nil")")
+    return found
 }

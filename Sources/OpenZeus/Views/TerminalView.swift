@@ -6,15 +6,19 @@ struct TerminalPane: View {
     @EnvironmentObject var terminalStore: TerminalStore
 
     var body: some View {
-        TerminalPaneContent(task: task, entry: terminalStore.entry(for: task.id))
+        logDebug("TerminalPane: rendering for task \(task.name) (\(task.id.uuidString))")
+        return TerminalPaneContent(task: task, entry: terminalStore.entry(for: task.id))
             .onAppear {
+                logInfo("TerminalPane.onAppear: task=\(task.name), watchMode=\(task.watchMode), cwd='\(task.workingDirectory.path(percentEncoded: false))'")
                 terminalStore.updateTaskMetadata(taskID: task.id, name: task.name, watchMode: task.watchMode, workingDirectory: task.workingDirectory.path(percentEncoded: false))
                 terminalStore.clearAttention(taskID: task.id)
             }
             .onChange(of: task.watchMode) { _, newMode in
+                logInfo("TerminalPane.onChange watchMode: \(newMode)")
                 terminalStore.updateTaskMetadata(taskID: task.id, name: task.name, watchMode: newMode, workingDirectory: task.workingDirectory.path(percentEncoded: false))
             }
             .onChange(of: task.name) { _, newName in
+                logInfo("TerminalPane.onChange name: '\(newName)'")
                 terminalStore.updateTaskMetadata(taskID: task.id, name: newName, watchMode: task.watchMode, workingDirectory: task.workingDirectory.path(percentEncoded: false))
             }
     }
@@ -56,6 +60,7 @@ private struct WindowControlBar: View {
     @State private var commitMessage = ""
 
     init(entry: TerminalEntry, projectID: UUID, workingDirectory: String) {
+        logDebug("WindowControlBar.init: projectID=\(projectID), windows.count=\(entry.windows.count)")
         self.entry = entry
         self.projectID = projectID
         self.workingDirectory = workingDirectory
@@ -65,18 +70,27 @@ private struct WindowControlBar: View {
     var body: some View {
         HStack(spacing: 6) {
             // Window controls
-            Button { entry.openWindow() } label: {
+            Button {
+                logInfo("WindowControlBar: + button clicked")
+                entry.openWindow()
+            } label: {
                 Image(systemName: "plus")
             }
             .help("New Window")
 
-            Button { entry.previousWindow() } label: {
+            Button {
+                logInfo("WindowControlBar: chevron.left button clicked")
+                entry.previousWindow()
+            } label: {
                 Image(systemName: "chevron.left")
             }
             .disabled(entry.windows.count <= 1)
             .help("Previous Window")
 
-            Button { entry.nextWindow() } label: {
+            Button {
+                logInfo("WindowControlBar: chevron.right button clicked")
+                entry.nextWindow()
+            } label: {
                 Image(systemName: "chevron.right")
             }
             .disabled(entry.windows.count <= 1)
@@ -85,23 +99,35 @@ private struct WindowControlBar: View {
             Divider().frame(height: 16)
 
             // Pane controls
-            Button { entry.splitHorizontal() } label: {
+            Button {
+                logInfo("WindowControlBar: split horizontal button clicked")
+                entry.splitHorizontal()
+            } label: {
                 Image(systemName: "rectangle.split.2x1")
             }
             .help("Split Pane Horizontally")
 
-            Button { entry.splitVertical() } label: {
+            Button {
+                logInfo("WindowControlBar: split vertical button clicked")
+                entry.splitVertical()
+            } label: {
                 Image(systemName: "rectangle.split.1x2")
             }
             .help("Split Pane Vertically")
 
-            Button { entry.rotatePane() } label: {
+            Button {
+                logInfo("WindowControlBar: rotate pane button clicked")
+                entry.rotatePane()
+            } label: {
                 Image(systemName: "rectangle.2.swap")
             }
             .disabled(entry.paneCount <= 1)
             .help("Rotate Panes")
 
-            Button { entry.closeWindow() } label: {
+            Button {
+                logInfo("WindowControlBar: xmark (close) button clicked")
+                entry.closeWindow()
+            } label: {
                 Image(systemName: "xmark")
             }
             .disabled(entry.windows.count <= 1)
@@ -110,12 +136,16 @@ private struct WindowControlBar: View {
             Divider().frame(height: 16)
 
             // Quick Commands
-            Button { showCommands.toggle() } label: {
+            Button {
+                logInfo("WindowControlBar: bolt (quick commands) button clicked, showCommands=\(!showCommands)")
+                showCommands.toggle()
+            } label: {
                 Image(systemName: "bolt.fill")
             }
             .help("Quick Commands")
             .popover(isPresented: $showCommands) {
                 QuickCommandsPopover(projectID: projectID) { command in
+                    logInfo("WindowControlBar: quick command '\(command)' sent")
                     entry.sendCommand(command, inNewVerticalPane: true)
                     showCommands = false
                 }
@@ -137,7 +167,10 @@ private struct WindowControlBar: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 3) {
                     ForEach(entry.windows, id: \.index) { window in
-                        Button { entry.selectWindow(index: window.index) } label: {
+                        Button {
+                            logInfo("WindowControlBar: window tab clicked, index=\(window.index), name='\(window.name)'")
+                            entry.selectWindow(index: window.index)
+                        } label: {
                             Text(window.name)
                                 .font(.caption)
                                 .padding(.horizontal, 8)
@@ -163,6 +196,7 @@ private struct WindowControlBar: View {
             .padding(.trailing, 10)
         }
         .onAppear {
+            logInfo("WindowControlBar.onAppear: fetching git status")
             Task { await gitService.fetchStatus() }
         }
     }
@@ -399,14 +433,17 @@ private struct TerminalRepresentable: NSViewRepresentable {
     let entry: TerminalEntry
 
     func makeNSView(context: Context) -> TerminalContainerView {
-        TerminalContainerView()
+        logInfo("TerminalRepresentable.makeNSView: creating TerminalContainerView for task \(task.name)")
+        return TerminalContainerView()
     }
 
     func updateNSView(_ container: TerminalContainerView, context: Context) {
         let terminalView = entry.terminalView
+        logDebug("TerminalRepresentable.updateNSView: task=\(task.name), process running=\(terminalView.process?.running ?? false)")
 
         // Swap in the correct terminal view if it isn't already the active subview
         if container.subviews.first !== terminalView {
+            logInfo("TerminalRepresentable.updateNSView: swapping terminal view into container")
             container.subviews.forEach { $0.removeFromSuperview() }
             container.addSubview(terminalView)
             terminalView.translatesAutoresizingMaskIntoConstraints = false
@@ -418,16 +455,21 @@ private struct TerminalRepresentable: NSViewRepresentable {
             ])
         }
 
-        guard terminalView.process?.running != true else { return }
+        guard terminalView.process?.running != true else {
+            logDebug("TerminalRepresentable.updateNSView: process already running, skipping")
+            return
+        }
 
         let shell = task.command.isEmpty
             ? (ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/bash")
             : task.command
         let cwd = task.workingDirectory.path(percentEncoded: false)
+        logInfo("TerminalRepresentable.updateNSView: starting process, shell='\(shell)', cwd='\(cwd)'")
 
         if let tmux = tmuxExecutable() {
             let sessionName = "zeus-\(task.id.uuidString)"
             container.sessionName = sessionName
+            logInfo("TerminalRepresentable.updateNSView: starting tmux session '\(sessionName)'")
             terminalView.startProcess(
                 executable: tmux,
                 args: ["new-session", "-A", "-s", sessionName, shell, "-l"],
@@ -438,9 +480,11 @@ private struct TerminalRepresentable: NSViewRepresentable {
             // native text-selection handlers.
             Task {
                 try? await Task.sleep(nanoseconds: 300_000_000)
+                logDebug("TerminalRepresentable.updateNSView: disabling tmux mouse mode")
                 await runProcessOutput(tmux, args: ["set-option", "-t", sessionName, "mouse", "off"])
             }
         } else {
+            logWarning("TerminalRepresentable.updateNSView: tmux not found, using direct shell")
             entry.tmuxUnavailable = true
             terminalView.startProcess(
                 executable: shell,
@@ -449,6 +493,7 @@ private struct TerminalRepresentable: NSViewRepresentable {
             )
         }
 
+        logInfo("TerminalRepresentable.updateNSView: marking entry as running")
         entry.isRunning = true
         Task { @MainActor in
             terminalView.window?.makeFirstResponder(terminalView)
