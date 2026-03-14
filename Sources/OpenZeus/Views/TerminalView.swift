@@ -27,7 +27,7 @@ private struct TerminalPaneContent: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if !entry.tmuxUnavailable {
-                WindowControlBar(entry: entry, projectID: task.projectID)
+                WindowControlBar(entry: entry, projectID: task.projectID, workingDirectory: task.workingDirectory.path(percentEncoded: false))
                 Divider()
             }
             if entry.tmuxUnavailable {
@@ -47,11 +47,24 @@ private struct TerminalPaneContent: View {
 private struct WindowControlBar: View {
     @ObservedObject var entry: TerminalEntry
     let projectID: UUID
+    let workingDirectory: String
     @EnvironmentObject var db: AppDatabase
     @State private var showCommands = false
+    @StateObject private var gitService: GitService
+    @State private var showCommitPopover = false
+    @State private var showRevertConfirmation = false
+    @State private var commitMessage = ""
+
+    init(entry: TerminalEntry, projectID: UUID, workingDirectory: String) {
+        self.entry = entry
+        self.projectID = projectID
+        self.workingDirectory = workingDirectory
+        _gitService = StateObject(wrappedValue: GitService(workingDirectory: workingDirectory))
+    }
 
     var body: some View {
         HStack(spacing: 6) {
+            // Window controls
             Button { entry.openWindow() } label: {
                 Image(systemName: "plus")
             }
@@ -71,6 +84,7 @@ private struct WindowControlBar: View {
 
             Divider().frame(height: 16)
 
+            // Pane controls
             Button { entry.splitHorizontal() } label: {
                 Image(systemName: "rectangle.split.2x1")
             }
@@ -95,6 +109,7 @@ private struct WindowControlBar: View {
 
             Divider().frame(height: 16)
 
+            // Quick Commands
             Button { showCommands.toggle() } label: {
                 Image(systemName: "bolt.fill")
             }
@@ -108,6 +123,9 @@ private struct WindowControlBar: View {
             }
 
             Divider().frame(height: 16)
+
+            // Git controls
+            gitButtons
 
             Spacer()
         }
@@ -144,6 +162,182 @@ private struct WindowControlBar: View {
             .fixedSize(horizontal: true, vertical: false)
             .padding(.trailing, 10)
         }
+        .onAppear {
+            Task { await gitService.fetchStatus() }
+        }
+    }
+
+    // MARK: - Git Buttons
+
+    @ViewBuilder
+    private var gitButtons: some View {
+        // Refresh button
+        Button { Task { await gitService.fetchStatus() } } label: {
+            Image(systemName: "arrow.clockwise")
+        }
+        .help("Refresh Git Status")
+        .disabled(gitService.isLoading)
+
+        // Git stats display
+        if let stats = gitService.stats {
+            // Branch indicator
+            HStack(spacing: 3) {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.caption2)
+                Text(stats.branch)
+                    .font(.caption)
+                    .lineLimit(1)
+            }
+            .foregroundStyle(.secondary)
+            .help("Current branch: \(stats.branch)")
+
+            // Behind/Ahead indicators
+            if stats.hasRemote {
+                if stats.behind > 0 {
+                    Label("\(stats.behind)", systemImage: "arrow.down")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .help("\(stats.behind) commits behind remote")
+                }
+                if stats.ahead > 0 {
+                    Label("\(stats.ahead)", systemImage: "arrow.up")
+                        .font(.caption)
+                        .foregroundStyle(.blue)
+                        .help("\(stats.ahead) commits ahead of remote")
+                }
+            }
+
+            // Change counts
+            if stats.staged > 0 {
+                Text("+\(stats.staged)")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.green)
+                    .help("\(stats.staged) staged changes")
+            }
+            if stats.unstaged > 0 {
+                Text("~\(stats.unstaged)")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.orange)
+                    .help("\(stats.unstaged) unstaged changes")
+            }
+            if stats.untracked > 0 {
+                Text("?\(stats.untracked)")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.secondary)
+                    .help("\(stats.untracked) untracked files")
+            }
+        } else if gitService.isLoading {
+            ProgressView()
+                .controlSize(.small)
+        }
+
+        if gitService.stats?.hasChanges == true {
+            // Stage all
+            Button { Task { await gitService.stageAll() } } label: {
+                Image(systemName: "plus.circle")
+            }
+            .help("Stage All Changes")
+
+            // Commit button with popover
+            Button { showCommitPopover = true } label: {
+                Image(systemName: "checkmark.circle")
+            }
+            .help("Commit Changes")
+            .popover(isPresented: $showCommitPopover) {
+                CommitPopover(
+                    message: $commitMessage,
+                    stats: gitService.stats,
+                    onCommit: { message in
+                        Task {
+                            let result = await gitService.stageAndCommit(message: message)
+                            if result.success {
+                                showCommitPopover = false
+                                commitMessage = ""
+                            }
+                        }
+                    },
+                    onCommitAndPush: { message in
+                        Task {
+                            let result = await gitService.stageCommitAndPush(message: message)
+                            if result.success {
+                                showCommitPopover = false
+                                commitMessage = ""
+                            }
+                        }
+                    }
+                )
+                .frame(width: 320)
+            }
+
+            // Revert changes with confirmation
+            Button { showRevertConfirmation = true } label: {
+                Image(systemName: "arrow.uturn.backward")
+            }
+            .help("Revert All Changes")
+            .confirmationDialog(
+                "Revert all changes?",
+                isPresented: $showRevertConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Revert All Changes", role: .destructive) {
+                    Task { await gitService.revertAllChanges() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This will discard all staged, unstaged, and untracked changes. This cannot be undone.")
+            }
+        }
+    }
+}
+
+// MARK: - Commit Popover
+
+private struct CommitPopover: View {
+    @Binding var message: String
+    let stats: GitStats?
+    let onCommit: (String) -> Void
+    let onCommitAndPush: (String) -> Void
+    @FocusState private var isFocused: Bool
+
+    private var trimmedMessage: String {
+        message.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Commit Changes")
+                .font(.headline)
+
+            if let stats {
+                Text("\(stats.staged) staged, \(stats.unstaged) unstaged, \(stats.untracked) untracked")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            TextField("Commit message", text: $message, axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+                .lineLimit(3...6)
+                .focused($isFocused)
+
+            HStack(spacing: 8) {
+                Button("Commit") {
+                    onCommit(trimmedMessage)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(trimmedMessage.isEmpty)
+
+                Button("Commit & Push") {
+                    onCommitAndPush(trimmedMessage)
+                }
+                .buttonStyle(.bordered)
+                .disabled(trimmedMessage.isEmpty)
+            }
+        }
+        .padding()
+        .onAppear { isFocused = true }
     }
 }
 
