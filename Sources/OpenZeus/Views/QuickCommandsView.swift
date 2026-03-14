@@ -123,6 +123,7 @@ private struct CommandRow: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .focusEffectDisabled()
                 .disabled(!hasChanges || trimmedDraft.isEmpty)
                 .help("Save")
 
@@ -132,6 +133,7 @@ private struct CommandRow: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .focusEffectDisabled()
                 .help("Cancel")
             } else {
                 Button(action: startEditing) {
@@ -153,6 +155,7 @@ private struct CommandRow: View {
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
+                .focusEffectDisabled()
                 .onHover { hovering in
                     isHovered = hovering
                 }
@@ -165,6 +168,7 @@ private struct CommandRow: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
+            .focusEffectDisabled()
             .help("Run")
 
             Button(role: .destructive, action: onDelete) {
@@ -173,6 +177,7 @@ private struct CommandRow: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
+            .focusEffectDisabled()
             .help("Delete")
         }
         .padding(.horizontal, 12)
