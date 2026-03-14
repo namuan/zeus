@@ -20,6 +20,12 @@ final class AppDatabase: ObservableObject {
         startObserving()
     }
 
+    init(inMemory: Void) throws {
+        dbQueue = try DatabaseQueue(path: ":memory:")
+        try Self.migrate(dbQueue)
+        startObserving()
+    }
+
     // MARK: - Schema
 
     private static func migrate(_ db: DatabaseQueue) throws {
@@ -132,15 +138,22 @@ final class AppDatabase: ObservableObject {
 
     func insertSavedCommand(_ command: SavedCommand) {
         try? dbQueue.write { db in try command.insert(db) }
+        if !savedCommands.contains(where: { $0.id == command.id }) {
+            savedCommands.append(command)
+        }
     }
 
     func updateSavedCommand(_ command: SavedCommand) {
         try? dbQueue.write { db in try command.update(db) }
+        if let idx = savedCommands.firstIndex(where: { $0.id == command.id }) {
+            savedCommands[idx] = command
+        }
     }
 
     func deleteSavedCommand(id: UUID) {
         try? dbQueue.write { db in
             try db.execute(sql: "DELETE FROM savedCommands WHERE id = ?", arguments: [id.uuidString])
         }
+        savedCommands.removeAll { $0.id == id }
     }
 }

@@ -47,6 +47,7 @@ private struct TerminalPaneContent: View {
 private struct WindowControlBar: View {
     @ObservedObject var entry: TerminalEntry
     let projectID: UUID
+    @EnvironmentObject var db: AppDatabase
     @State private var showCommands = false
 
     var body: some View {
@@ -103,6 +104,7 @@ private struct WindowControlBar: View {
                     entry.sendCommand(command)
                     showCommands = false
                 }
+                .environmentObject(db)
             }
 
             Divider().frame(height: 16)

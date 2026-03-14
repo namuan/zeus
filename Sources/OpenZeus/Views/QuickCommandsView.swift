@@ -66,18 +66,21 @@ struct QuickCommandsPopover: View {
             } else {
                 Button {
                     showingAdd = true
-                    addFieldFocused = true
                 } label: {
                     Label("New Command", systemImage: "plus")
                         .font(.callout)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.plain)
+                .contentShape(Rectangle())
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
             }
         }
         .frame(width: 320)
+        .onChange(of: showingAdd) { _, newValue in
+            if newValue { addFieldFocused = true }
+        }
     }
 
     private func save() {

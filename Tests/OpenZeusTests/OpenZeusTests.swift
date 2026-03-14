@@ -28,3 +28,27 @@ import Testing
     let b = TerminalState(lastCommand: nil, scrollOffset: nil, customPrompt: nil, environmentOverrides: [:])
     #expect(a == b)
 }
+
+@Test @MainActor func savedCommandInsertAndFetch() throws {
+    let db = try AppDatabase(inMemory: ())
+    let project = Project(id: UUID(), name: "Test", directoryURL: URL(fileURLWithPath: "/tmp"))
+    db.insertProject(project)
+    let cmd = SavedCommand(id: UUID(), projectID: project.id, command: "swift build")
+    db.insertSavedCommand(cmd)
+    // Allow ValueObservation to fire
+    let fetched = db.savedCommands(for: project.id)
+    #expect(fetched.count == 1)
+    #expect(fetched.first?.command == "swift build")
+    #expect(fetched.first?.projectID == project.id)
+}
+
+@Test @MainActor func savedCommandDeleteWorks() throws {
+    let db = try AppDatabase(inMemory: ())
+    let project = Project(id: UUID(), name: "Test", directoryURL: URL(fileURLWithPath: "/tmp"))
+    db.insertProject(project)
+    let cmd = SavedCommand(id: UUID(), projectID: project.id, command: "echo hello")
+    db.insertSavedCommand(cmd)
+    db.deleteSavedCommand(id: cmd.id)
+    let fetched = db.savedCommands(for: project.id)
+    #expect(fetched.isEmpty)
+}
