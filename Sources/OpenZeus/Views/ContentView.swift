@@ -42,6 +42,8 @@ struct ContentView: View {
         } detail: {
             if let task = selectedTask {
                 TerminalPane(task: task)
+            } else if let project = selectedProject {
+                NoTaskDetailPane(project: project)
             } else {
                 ContentUnavailableView("No Task Selected",
                                        systemImage: "terminal",

@@ -8,34 +8,84 @@ struct TerminalPane: View {
 
     var body: some View {
         logDebug("TerminalPane: rendering for task \(task.name) (\(task.id.uuidString))")
-        return TerminalPaneContent(task: task, entry: terminalStore.entry(for: task.id))
-            .onAppear {
-                logInfo("TerminalPane.onAppear: task=\(task.name), watchMode=\(task.watchMode), cwd='\(task.workingDirectory.path(percentEncoded: false))'")
-                terminalStore.updateTaskMetadata(taskID: task.id, name: task.name, watchMode: task.watchMode, workingDirectory: task.workingDirectory.path(percentEncoded: false))
-                terminalStore.clearAttention(taskID: task.id)
-            }
-            .onChange(of: task.watchMode) { _, newMode in
-                logInfo("TerminalPane.onChange watchMode: \(newMode)")
-                terminalStore.updateTaskMetadata(taskID: task.id, name: task.name, watchMode: newMode, workingDirectory: task.workingDirectory.path(percentEncoded: false))
-            }
-            .onChange(of: task.name) { _, newName in
-                logInfo("TerminalPane.onChange name: '\(newName)'")
-                terminalStore.updateTaskMetadata(taskID: task.id, name: newName, watchMode: task.watchMode, workingDirectory: task.workingDirectory.path(percentEncoded: false))
-            }
+        return TerminalPaneContent(
+            sessionID: task.id,
+            projectID: task.projectID,
+            command: task.command,
+            workingDirectory: task.workingDirectory.path(percentEncoded: false),
+            navigationTitle: task.name,
+            entry: terminalStore.entry(for: task.id)
+        )
+        .onAppear {
+            logInfo("TerminalPane.onAppear: task=\(task.name), watchMode=\(task.watchMode), cwd='\(task.workingDirectory.path(percentEncoded: false))'")
+            terminalStore.updateTaskMetadata(taskID: task.id, name: task.name, watchMode: task.watchMode, workingDirectory: task.workingDirectory.path(percentEncoded: false))
+            terminalStore.clearAttention(taskID: task.id)
+        }
+        .onChange(of: task.watchMode) { _, newMode in
+            logInfo("TerminalPane.onChange watchMode: \(newMode)")
+            terminalStore.updateTaskMetadata(taskID: task.id, name: task.name, watchMode: newMode, workingDirectory: task.workingDirectory.path(percentEncoded: false))
+        }
+        .onChange(of: task.name) { _, newName in
+            logInfo("TerminalPane.onChange name: '\(newName)'")
+            terminalStore.updateTaskMetadata(taskID: task.id, name: newName, watchMode: task.watchMode, workingDirectory: task.workingDirectory.path(percentEncoded: false))
+        }
+    }
+}
+
+// Shown when a project is selected but no task is selected.
+struct NoTaskDetailPane: View {
+    let project: Project
+    @EnvironmentObject var terminalStore: TerminalStore
+
+    var body: some View {
+        let cwd = project.directoryURL.path(percentEncoded: false)
+        return TerminalPaneContent(
+            sessionID: project.id,
+            projectID: project.id,
+            command: "",
+            workingDirectory: cwd,
+            navigationTitle: project.name,
+            entry: terminalStore.entry(for: project.id),
+            autoStart: false
+        )
+        .onAppear {
+            terminalStore.updateTaskMetadata(taskID: project.id, name: project.name, watchMode: .off, workingDirectory: cwd)
+        }
     }
 }
 
 private struct TerminalPaneContent: View {
-    let task: AgentTask
+    let sessionID: UUID
+    let projectID: UUID
+    let command: String
+    let workingDirectory: String
+    let navigationTitle: String
     @ObservedObject var entry: TerminalEntry
+    @State private var terminalVisible: Bool
+
+    init(sessionID: UUID, projectID: UUID, command: String, workingDirectory: String,
+         navigationTitle: String, entry: TerminalEntry, autoStart: Bool = true) {
+        self.sessionID = sessionID
+        self.projectID = projectID
+        self.command = command
+        self.workingDirectory = workingDirectory
+        self.navigationTitle = navigationTitle
+        self._entry = ObservedObject(wrappedValue: entry)
+        self._terminalVisible = State(initialValue: autoStart)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if !entry.tmuxUnavailable {
-                WindowControlBar(entry: entry, projectID: task.projectID, workingDirectory: task.workingDirectory.path(percentEncoded: false))
+                WindowControlBar(
+                    entry: entry,
+                    projectID: projectID,
+                    workingDirectory: workingDirectory,
+                    terminalVisible: $terminalVisible
+                )
                 Divider()
             }
-            AppLauncherBar(projectID: task.projectID, workingDirectory: task.workingDirectory.path(percentEncoded: false))
+            AppLauncherBar(projectID: projectID, workingDirectory: workingDirectory)
             Divider()
             if entry.tmuxUnavailable {
                 Label("tmux not found — sessions won't persist", systemImage: "exclamationmark.triangle")
@@ -45,9 +95,14 @@ private struct TerminalPaneContent: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(.bar)
             }
-            TerminalRepresentable(task: task, entry: entry)
+            if terminalVisible {
+                TerminalRepresentable(sessionID: sessionID, command: command, workingDirectory: workingDirectory, entry: entry)
+            } else {
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
-        .navigationTitle(task.name)
+        .navigationTitle(navigationTitle)
     }
 }
 
@@ -55,109 +110,23 @@ private struct WindowControlBar: View {
     @ObservedObject var entry: TerminalEntry
     let projectID: UUID
     let workingDirectory: String
+    @Binding var terminalVisible: Bool
     @EnvironmentObject var db: AppDatabase
     @State private var showCommands = false
-    @StateObject private var gitService: GitService
-    @State private var showRevertConfirmation = false
 
-    init(entry: TerminalEntry, projectID: UUID, workingDirectory: String) {
+    init(entry: TerminalEntry, projectID: UUID, workingDirectory: String, terminalVisible: Binding<Bool>) {
         logDebug("WindowControlBar.init: projectID=\(projectID), windows.count=\(entry.windows.count)")
-        self.entry = entry
+        self._entry = ObservedObject(wrappedValue: entry)
         self.projectID = projectID
         self.workingDirectory = workingDirectory
-        _gitService = StateObject(wrappedValue: GitService(workingDirectory: workingDirectory))
+        self._terminalVisible = terminalVisible
     }
 
     var body: some View {
         HStack(spacing: 6) {
-            // Window controls
-            Button {
-                logInfo("WindowControlBar: + button clicked")
-                entry.openWindow()
-            } label: {
-                Image(systemName: "plus")
-            }
-            .help("New Window")
-
-            Button {
-                logInfo("WindowControlBar: chevron.left button clicked")
-                entry.previousWindow()
-            } label: {
-                Image(systemName: "chevron.left")
-            }
-            .disabled(entry.windows.count <= 1)
-            .help("Previous Window")
-
-            Button {
-                logInfo("WindowControlBar: chevron.right button clicked")
-                entry.nextWindow()
-            } label: {
-                Image(systemName: "chevron.right")
-            }
-            .disabled(entry.windows.count <= 1)
-            .help("Next Window")
-
+            terminalControls
             Divider().frame(height: 16)
-
-            // Pane controls
-            Button {
-                logInfo("WindowControlBar: split horizontal button clicked")
-                entry.splitHorizontal()
-            } label: {
-                Image(systemName: "rectangle.split.2x1")
-            }
-            .help("Split Pane Horizontally")
-
-            Button {
-                logInfo("WindowControlBar: split vertical button clicked")
-                entry.splitVertical()
-            } label: {
-                Image(systemName: "rectangle.split.1x2")
-            }
-            .help("Split Pane Vertically")
-
-            Button {
-                logInfo("WindowControlBar: rotate pane button clicked")
-                entry.rotatePane()
-            } label: {
-                Image(systemName: "rectangle.2.swap")
-            }
-            .disabled(entry.paneCount <= 1)
-            .help("Rotate Panes")
-
-            Button {
-                logInfo("WindowControlBar: xmark (close) button clicked")
-                entry.closeWindow()
-            } label: {
-                Image(systemName: "xmark")
-            }
-            .disabled(entry.windows.count <= 1)
-            .help("Close Window")
-
-            Divider().frame(height: 16)
-
-            // Quick Commands
-            Button {
-                logInfo("WindowControlBar: bolt (quick commands) button clicked, showCommands=\(!showCommands)")
-                showCommands.toggle()
-            } label: {
-                Image(systemName: "bolt.fill")
-            }
-            .help("Quick Commands")
-            .popover(isPresented: $showCommands) {
-                QuickCommandsPopover(projectID: projectID) { command in
-                    logInfo("WindowControlBar: quick command '\(command)' sent, hasActiveProcess=\(entry.hasActiveProcess)")
-                    entry.sendCommand(command, inNewVerticalPane: entry.hasActiveProcess)
-                    showCommands = false
-                }
-                .environmentObject(db)
-            }
-
-            Divider().frame(height: 16)
-
-            // Git controls
-            gitButtons
-
+            GitControlsView(workingDirectory: workingDirectory)
             Spacer()
         }
         .buttonStyle(.borderless)
@@ -165,57 +134,160 @@ private struct WindowControlBar: View {
         .padding(.vertical, 2)
         .background(.bar)
         .overlay(alignment: .trailing) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 3) {
-                    ForEach(entry.windows, id: \.index) { window in
-                        Button {
-                            logInfo("WindowControlBar: window tab clicked, index=\(window.index), name='\(window.name)'")
-                            entry.selectWindow(index: window.index)
-                        } label: {
-                            Text(window.name)
-                                .font(.caption)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(
-                                    window.index == entry.currentWindowIndex
-                                        ? Color.accentColor
-                                        : Color.primary.opacity(0.1)
-                                )
-                                .foregroundStyle(
-                                    window.index == entry.currentWindowIndex
-                                        ? Color.white
-                                        : Color.primary
-                                )
-                                .clipShape(RoundedRectangle(cornerRadius: 4))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.vertical, 4)
-            }
-            .fixedSize(horizontal: true, vertical: false)
-            .padding(.trailing, 10)
-        }
-        .onAppear {
-            logInfo("WindowControlBar.onAppear: fetching git status")
-            Task { await gitService.fetchStatus() }
+            windowTabs
         }
     }
 
-    // MARK: - Git Buttons
+    @ViewBuilder
+    private var terminalControls: some View {
+        Button {
+            logInfo("WindowControlBar: + button clicked, terminalVisible=\(terminalVisible)")
+            if terminalVisible {
+                entry.openWindow()
+            } else {
+                terminalVisible = true
+            }
+        } label: {
+            Image(systemName: "plus")
+        }
+        .help("New Window")
+
+        Button {
+            logInfo("WindowControlBar: chevron.left button clicked")
+            entry.previousWindow()
+        } label: {
+            Image(systemName: "chevron.left")
+        }
+        .disabled(entry.windows.count <= 1)
+        .help("Previous Window")
+
+        Button {
+            logInfo("WindowControlBar: chevron.right button clicked")
+            entry.nextWindow()
+        } label: {
+            Image(systemName: "chevron.right")
+        }
+        .disabled(entry.windows.count <= 1)
+        .help("Next Window")
+
+        Divider().frame(height: 16)
+
+        Button {
+            logInfo("WindowControlBar: split horizontal button clicked")
+            entry.splitHorizontal()
+        } label: {
+            Image(systemName: "rectangle.split.2x1")
+        }
+        .help("Split Pane Horizontally")
+
+        Button {
+            logInfo("WindowControlBar: split vertical button clicked")
+            entry.splitVertical()
+        } label: {
+            Image(systemName: "rectangle.split.1x2")
+        }
+        .help("Split Pane Vertically")
+
+        Button {
+            logInfo("WindowControlBar: rotate pane button clicked")
+            entry.rotatePane()
+        } label: {
+            Image(systemName: "rectangle.2.swap")
+        }
+        .disabled(entry.paneCount <= 1)
+        .help("Rotate Panes")
+
+        Button {
+            logInfo("WindowControlBar: xmark (close) button clicked")
+            entry.closeWindow()
+        } label: {
+            Image(systemName: "xmark")
+        }
+        .disabled(entry.windows.count <= 1)
+        .help("Close Window")
+
+        Divider().frame(height: 16)
+
+        Button {
+            logInfo("WindowControlBar: bolt (quick commands) button clicked, showCommands=\(!showCommands)")
+            showCommands.toggle()
+        } label: {
+            Image(systemName: "bolt.fill")
+        }
+        .help("Quick Commands")
+        .popover(isPresented: $showCommands) {
+            QuickCommandsPopover(projectID: projectID) { command in
+                logInfo("WindowControlBar: quick command '\(command)' sent, hasActiveProcess=\(entry.hasActiveProcess)")
+                entry.sendCommand(command, inNewVerticalPane: entry.hasActiveProcess)
+                showCommands = false
+            }
+            .environmentObject(db)
+        }
+
+        Divider().frame(height: 16)
+    }
+
+    private var windowTabs: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 3) {
+                ForEach(entry.windows, id: \.index) { window in
+                    Button {
+                        logInfo("WindowControlBar: window tab clicked, index=\(window.index), name='\(window.name)'")
+                        entry.selectWindow(index: window.index)
+                    } label: {
+                        Text(window.name)
+                            .font(.caption)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(
+                                window.index == entry.currentWindowIndex
+                                    ? Color.accentColor
+                                    : Color.primary.opacity(0.1)
+                            )
+                            .foregroundStyle(
+                                window.index == entry.currentWindowIndex
+                                    ? Color.white
+                                    : Color.primary
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+        .fixedSize(horizontal: true, vertical: false)
+        .padding(.trailing, 10)
+    }
+}
+
+// MARK: - Git controls (shared)
+
+private struct GitControlsView: View {
+    @StateObject private var gitService: GitService
+    @State private var showRevertConfirmation = false
+
+    init(workingDirectory: String) {
+        _gitService = StateObject(wrappedValue: GitService(workingDirectory: workingDirectory))
+    }
+
+    var body: some View {
+        gitButtons
+            .onAppear {
+                logInfo("GitControlsView.onAppear: fetching git status")
+                Task { await gitService.fetchStatus() }
+            }
+    }
 
     @ViewBuilder
     private var gitButtons: some View {
-        // Refresh button
         Button { Task { await gitService.fetchStatus() } } label: {
             Image(systemName: "arrow.clockwise")
         }
         .help("Refresh Git Status")
         .disabled(gitService.isLoading)
 
-        // Git stats display
         if let stats = gitService.stats {
-            // Branch indicator
             HStack(spacing: 3) {
                 Image(systemName: "arrow.triangle.branch")
                     .font(.caption2)
@@ -226,7 +298,6 @@ private struct WindowControlBar: View {
             .foregroundStyle(.secondary)
             .help("Current branch: \(stats.branch)")
 
-            // Behind/Ahead indicators
             if stats.hasRemote {
                 if stats.behind > 0 {
                     Label("\(stats.behind)", systemImage: "arrow.down")
@@ -242,7 +313,6 @@ private struct WindowControlBar: View {
                 }
             }
 
-            // Change counts
             if stats.staged > 0 {
                 Text("+\(stats.staged)")
                     .font(.caption)
@@ -270,7 +340,6 @@ private struct WindowControlBar: View {
         }
 
         if gitService.stats?.hasChanges == true {
-            // Revert changes with confirmation
             Button { showRevertConfirmation = true } label: {
                 Image(systemName: "arrow.uturn.backward")
             }
@@ -390,17 +459,12 @@ private class TerminalContainerView: NSView {
     nonisolated(unsafe) private var scrollAccumulator: CGFloat = 0
     nonisolated(unsafe) private var scrollTimer: Timer?
 
-    // Return self for all hit tests so that scroll events land here
-    // instead of being consumed by LocalProcessTerminalView's own scrollWheel
-    // (which has no tmux scrollback to operate on).
     override func hitTest(_ point: NSPoint) -> NSView? {
         bounds.contains(point) ? self : nil
     }
 
-    // Don't steal keyboard focus — that stays with the terminal subview.
     override var acceptsFirstResponder: Bool { false }
 
-    // Forward click/drag to the terminal so selection works natively.
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(subviews.first)
         subviews.first?.mouseDown(with: event)
@@ -439,19 +503,20 @@ private class TerminalContainerView: NSView {
 }
 
 private struct TerminalRepresentable: NSViewRepresentable {
-    let task: AgentTask
+    let sessionID: UUID
+    let command: String
+    let workingDirectory: String
     let entry: TerminalEntry
 
     func makeNSView(context: Context) -> TerminalContainerView {
-        logInfo("TerminalRepresentable.makeNSView: creating TerminalContainerView for task \(task.name)")
+        logInfo("TerminalRepresentable.makeNSView: creating TerminalContainerView for session \(sessionID)")
         return TerminalContainerView()
     }
 
     func updateNSView(_ container: TerminalContainerView, context: Context) {
         let terminalView = entry.terminalView
-        logDebug("TerminalRepresentable.updateNSView: task=\(task.name), process running=\(terminalView.process?.running ?? false)")
+        logDebug("TerminalRepresentable.updateNSView: session=\(sessionID), process running=\(terminalView.process?.running ?? false)")
 
-        // Swap in the correct terminal view if it isn't already the active subview
         if container.subviews.first !== terminalView {
             logInfo("TerminalRepresentable.updateNSView: swapping terminal view into container")
             container.subviews.forEach { $0.removeFromSuperview() }
@@ -477,23 +542,20 @@ private struct TerminalRepresentable: NSViewRepresentable {
             return
         }
 
-        let shell = task.command.isEmpty
+        let shell = command.isEmpty
             ? (ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/bash")
-            : task.command
-        let cwd = task.workingDirectory.path(percentEncoded: false)
-        logInfo("TerminalRepresentable.updateNSView: starting process, shell='\(shell)', cwd='\(cwd)'")
+            : command
+        logInfo("TerminalRepresentable.updateNSView: starting process, shell='\(shell)', cwd='\(workingDirectory)'")
 
         if let tmux = tmuxExecutable() {
-            let sessionName = "zeus-\(task.id.uuidString)"
+            let sessionName = "zeus-\(sessionID.uuidString)"
             container.sessionName = sessionName
             logInfo("TerminalRepresentable.updateNSView: starting tmux session '\(sessionName)'")
             terminalView.startProcess(
                 executable: tmux,
                 args: ["new-session", "-A", "-s", sessionName, shell, "-l"],
-                currentDirectory: cwd
+                currentDirectory: workingDirectory
             )
-            // Enable mouse mode so clicking switches panes and tmux can handle
-            // mouse interactions inside the session.
             Task {
                 try? await Task.sleep(nanoseconds: 300_000_000)
                 logDebug("TerminalRepresentable.updateNSView: enabling tmux mouse mode")
@@ -505,7 +567,7 @@ private struct TerminalRepresentable: NSViewRepresentable {
             terminalView.startProcess(
                 executable: shell,
                 args: ["-l"],
-                currentDirectory: cwd
+                currentDirectory: workingDirectory
             )
         }
 
