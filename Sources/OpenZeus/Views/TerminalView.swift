@@ -146,8 +146,55 @@ private struct WindowControlBar: View {
 }
 
 private class TerminalContainerView: NSView {
+    var sessionName: String?
+    nonisolated(unsafe) private var scrollAccumulator: CGFloat = 0
+    nonisolated(unsafe) private var scrollTimer: Timer?
+
+    // Return self for all hit tests so that scroll events land here
+    // instead of being consumed by LocalProcessTerminalView's own scrollWheel
+    // (which has no tmux scrollback to operate on).
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        bounds.contains(point) ? self : nil
+    }
+
+    // Don't steal keyboard focus — that stays with the terminal subview.
+    override var acceptsFirstResponder: Bool { false }
+
+    // Forward click/drag to the terminal so selection works natively.
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(subviews.first)
+        subviews.first?.mouseDown(with: event)
+    }
+    override func mouseUp(with event: NSEvent) { subviews.first?.mouseUp(with: event) }
+    override func mouseDragged(with event: NSEvent) { subviews.first?.mouseDragged(with: event) }
+    override func rightMouseDown(with event: NSEvent) { subviews.first?.rightMouseDown(with: event) }
+    override func rightMouseUp(with event: NSEvent) { subviews.first?.rightMouseUp(with: event) }
+    override func otherMouseDown(with event: NSEvent) { subviews.first?.otherMouseDown(with: event) }
+    override func mouseMoved(with event: NSEvent) { subviews.first?.mouseMoved(with: event) }
+
     override func scrollWheel(with event: NSEvent) {
-        subviews.first?.scrollWheel(with: event) ?? super.scrollWheel(with: event)
+        guard let sessionName, let tmux = tmuxExecutable() else {
+            subviews.first?.scrollWheel(with: event) ?? super.scrollWheel(with: event)
+            return
+        }
+
+        scrollAccumulator += event.scrollingDeltaY
+        scrollTimer?.invalidate()
+        scrollTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: false) { [weak self] _ in
+            guard let self else { return }
+            let delta = self.scrollAccumulator
+            self.scrollAccumulator = 0
+            let steps = max(1, Int(abs(delta) / 8))
+            let goingUp = delta > 0
+            Task {
+                if goingUp {
+                    await runProcessOutput(tmux, args: ["copy-mode", "-t", sessionName])
+                    await runProcessOutput(tmux, args: ["send-keys", "-X", "-N", "\(steps)", "-t", sessionName, "scroll-up"])
+                } else {
+                    await runProcessOutput(tmux, args: ["send-keys", "-X", "-N", "\(steps)", "-t", sessionName, "scroll-down"])
+                }
+            }
+        }
     }
 }
 
@@ -184,20 +231,18 @@ private struct TerminalRepresentable: NSViewRepresentable {
 
         if let tmux = tmuxExecutable() {
             let sessionName = "zeus-\(task.id.uuidString)"
+            container.sessionName = sessionName
             terminalView.startProcess(
                 executable: tmux,
                 args: ["new-session", "-A", "-s", sessionName, shell, "-l"],
                 currentDirectory: cwd
             )
-            // Enable mouse scrolling on the tmux server.
-            // Runs after a short delay to ensure the session is ready.
-            DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) {
-                let p = Process()
-                p.executableURL = URL(fileURLWithPath: tmux)
-                p.arguments = ["set-option", "-g", "mouse", "on"]
-                p.standardOutput = Pipe()
-                p.standardError = Pipe()
-                try? p.run()
+            // Disable mouse mode for this session so tmux does not send
+            // mouse-tracking escape sequences that would intercept SwiftTerm's
+            // native text-selection handlers.
+            Task {
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                await runProcessOutput(tmux, args: ["set-option", "-t", sessionName, "mouse", "off"])
             }
         } else {
             entry.tmuxUnavailable = true
@@ -209,7 +254,7 @@ private struct TerminalRepresentable: NSViewRepresentable {
         }
 
         entry.isRunning = true
-        DispatchQueue.main.async {
+        Task { @MainActor in
             terminalView.window?.makeFirstResponder(terminalView)
         }
     }

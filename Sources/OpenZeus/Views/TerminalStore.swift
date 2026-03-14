@@ -199,7 +199,7 @@ final class TerminalEntry: ObservableObject {
 }
 
 @discardableResult
-private nonisolated func runProcessOutput(_ executable: String, args: [String]) async -> String {
+nonisolated func runProcessOutput(_ executable: String, args: [String]) async -> String {
     await withCheckedContinuation { continuation in
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
