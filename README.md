@@ -27,13 +27,19 @@ Builds a release binary, creates `OpenZeus.app`, installs it to `~/Applications`
 swift build       # debug build
 swift run OpenZeus
 swift test
+./scripts/lint.sh
+./scripts/check.sh
+./scripts/install-hooks.sh
 ```
+
+`./scripts/install-hooks.sh` configures Git to use the repo's pre-commit hook. Each commit then runs SwiftLint and `swift test` before Git creates the commit.
 
 ## Requirements
 
 - macOS 15+
 - Swift 6+
 - tmux (recommended — `brew install tmux`)
+- SwiftLint (`brew install swiftlint`)
 
 ## License
 

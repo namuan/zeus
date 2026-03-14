@@ -21,6 +21,15 @@ swift run OpenZeus
 # Test
 swift test
 
+# Lint
+./scripts/lint.sh
+
+# Lint + tests
+./scripts/check.sh
+
+# Install repo Git hooks
+./scripts/install-hooks.sh
+
 # Build release + install to ~/Applications/OpenZeus.app
 ./install.command
 ```
@@ -86,7 +95,7 @@ Triggers when a task transitions from active → idle.
 | [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) | 1.2.0+ | PTY-based terminal emulation |
 | [GRDB](https://github.com/groue/GRDB.swift) | 6.0.0+ | SQLite persistence |
 
-No Homebrew or CocoaPods required. `swift build` fetches all dependencies automatically.
+Homebrew is not required for app dependencies, but local linting uses SwiftLint from `$PATH` (for example `brew install swiftlint`). `swift build` fetches Swift package dependencies automatically.
 
 ## Testing
 
@@ -94,9 +103,13 @@ Framework: **Swift Testing** (not XCTest)
 
 ```bash
 swift test
+./scripts/lint.sh
+./scripts/check.sh
 ```
 
 Tests live in `Tests/OpenZeusTests/OpenZeusTests.swift`. Use `@Test`, `#expect()`, and `#require()` for new tests. Add `@testable import OpenZeus` for internal access.
+
+Git pre-commit hooks live in `.githooks/`. Run `./scripts/install-hooks.sh` once per clone to make commits execute `./scripts/check.sh` before the commit is created.
 
 Current tests cover model serialization (`AgentStatus`, `TerminalState`). New tests should cover model round-trips, GRDB persistence, and process lifecycle logic.
 
