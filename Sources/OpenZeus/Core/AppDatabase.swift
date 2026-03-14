@@ -190,7 +190,17 @@ final class AppDatabase: ObservableObject {
     // MARK: - Saved Commands
 
     func savedCommands(for projectID: UUID) -> [SavedCommand] {
-        savedCommands.filter { $0.projectID == projectID }
+        savedCommands.filter { $0.projectID == projectID || $0.isGlobal }
+    }
+
+    func promoteToGlobal(id: UUID) {
+        guard let cmd = savedCommands.first(where: { $0.id == id }) else { return }
+        updateSavedCommand(SavedCommand(id: cmd.id, projectID: nil, command: cmd.command))
+    }
+
+    func demoteToProject(id: UUID, projectID: UUID) {
+        guard let cmd = savedCommands.first(where: { $0.id == id }) else { return }
+        updateSavedCommand(SavedCommand(id: cmd.id, projectID: projectID, command: cmd.command))
     }
 
     func insertSavedCommand(_ command: SavedCommand) {

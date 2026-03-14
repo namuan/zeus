@@ -7,7 +7,9 @@ struct QuickCommandsPopover: View {
     @State private var newCommand = ""
     @FocusState private var addFieldFocused: Bool
 
-    var commands: [SavedCommand] { db.savedCommands(for: projectID) }
+    var allCommands: [SavedCommand] { db.savedCommands(for: projectID) }
+    var projectCommands: [SavedCommand] { allCommands.filter { $0.projectID == projectID } }
+    var globalCommands: [SavedCommand] { allCommands.filter { $0.isGlobal } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -19,7 +21,7 @@ struct QuickCommandsPopover: View {
 
             Divider()
 
-            if commands.isEmpty {
+            if allCommands.isEmpty {
                 Text("No saved commands yet")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -28,15 +30,32 @@ struct QuickCommandsPopover: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        ForEach(commands) { cmd in
-                            CommandRow(command: cmd, onRun: {
-                                onRun(cmd.command)
-                            }, onSave: { updated in
-                                db.updateSavedCommand(updated)
-                            }, onDelete: {
-                                db.deleteSavedCommand(id: cmd.id)
-                            })
-                            Divider()
+                        if !projectCommands.isEmpty {
+                            SectionHeader("This Project")
+                            ForEach(projectCommands) { cmd in
+                                CommandRow(
+                                    command: cmd,
+                                    onRun: { onRun(cmd.command) },
+                                    onSave: { db.updateSavedCommand($0) },
+                                    onDelete: { db.deleteSavedCommand(id: cmd.id) },
+                                    scopeAction: .promote { db.promoteToGlobal(id: cmd.id) }
+                                )
+                                Divider()
+                            }
+                        }
+
+                        if !globalCommands.isEmpty {
+                            SectionHeader("Global")
+                            ForEach(globalCommands) { cmd in
+                                CommandRow(
+                                    command: cmd,
+                                    onRun: { onRun(cmd.command) },
+                                    onSave: { db.updateSavedCommand($0) },
+                                    onDelete: { db.deleteSavedCommand(id: cmd.id) },
+                                    scopeAction: .demote { db.demoteToProject(id: cmd.id, projectID: projectID) }
+                                )
+                                Divider()
+                            }
                         }
                     }
                 }
@@ -59,14 +78,14 @@ struct QuickCommandsPopover: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .disabled(newCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .help("Add command")
+                .help("Add command (project-specific)")
             }
             .padding(10)
         }
         .frame(width: 440)
         .frame(minHeight: 420)
         .onAppear {
-            addFieldFocused = commands.isEmpty
+            addFieldFocused = allCommands.isEmpty
         }
     }
 
@@ -79,22 +98,66 @@ struct QuickCommandsPopover: View {
     }
 }
 
+private struct SectionHeader: View {
+    let title: String
+
+    init(_ title: String) { self.title = title }
+
+    var body: some View {
+        Text(title)
+            .font(.caption)
+            .fontWeight(.semibold)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+            .padding(.bottom, 2)
+    }
+}
+
+private enum ScopeAction {
+    case promote(() -> Void)
+    case demote(() -> Void)
+
+    var icon: String {
+        switch self {
+        case .promote: "globe"
+        case .demote: "folder"
+        }
+    }
+
+    var help: String {
+        switch self {
+        case .promote: "Make global (available in all projects)"
+        case .demote: "Move to this project only"
+        }
+    }
+
+    func callAsFunction() {
+        switch self {
+        case .promote(let action), .demote(let action): action()
+        }
+    }
+}
+
 private struct CommandRow: View {
     let command: SavedCommand
     let onRun: () -> Void
     let onSave: (SavedCommand) -> Void
     let onDelete: () -> Void
+    let scopeAction: ScopeAction
 
     @State private var isEditing = false
     @State private var isHovered = false
     @State private var draft: String
     @FocusState private var editFieldFocused: Bool
 
-    init(command: SavedCommand, onRun: @escaping () -> Void, onSave: @escaping (SavedCommand) -> Void, onDelete: @escaping () -> Void) {
+    init(command: SavedCommand, onRun: @escaping () -> Void, onSave: @escaping (SavedCommand) -> Void, onDelete: @escaping () -> Void, scopeAction: ScopeAction) {
         self.command = command
         self.onRun = onRun
         self.onSave = onSave
         self.onDelete = onDelete
+        self.scopeAction = scopeAction
         _draft = State(initialValue: command.command)
     }
 
@@ -161,6 +224,15 @@ private struct CommandRow: View {
                 }
                 .help("Click to edit")
             }
+
+            Button(action: scopeAction.callAsFunction) {
+                Image(systemName: scopeAction.icon)
+                    .font(.caption)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .focusEffectDisabled()
+            .help(scopeAction.help)
 
             Button(action: onRun) {
                 Image(systemName: "play.fill")
