@@ -45,3 +45,6 @@ Carthage/Build/
 
 # Code Injection
 iOSInjectionProject/
+
+# Temporary verification scripts (created by Claude, deleted after successful tasks)
+_verify/
