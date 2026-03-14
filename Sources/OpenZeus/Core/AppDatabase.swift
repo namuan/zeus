@@ -73,6 +73,23 @@ final class AppDatabase: ObservableObject {
                 t.column("command", .text).notNull()
             }
         }
+        migrator.registerMigration("v5") { db in
+            let savedCommandColumns = try db.columns(in: "savedCommands").map(\.name)
+            guard savedCommandColumns.contains("name") else { return }
+
+            try db.create(table: "savedCommands_v2") { t in
+                t.primaryKey("id", .text)
+                t.column("projectId", .text).references("projects", onDelete: .cascade)
+                t.column("command", .text).notNull()
+            }
+            try db.execute(sql: """
+                INSERT INTO savedCommands_v2 (id, projectId, command)
+                SELECT id, projectId, command
+                FROM savedCommands
+                """)
+            try db.drop(table: "savedCommands")
+            try db.rename(table: "savedCommands_v2", to: "savedCommands")
+        }
         try migrator.migrate(db)
     }
 
@@ -145,23 +162,35 @@ final class AppDatabase: ObservableObject {
     }
 
     func insertSavedCommand(_ command: SavedCommand) {
-        try? dbQueue.write { db in try command.insert(db) }
-        if !savedCommands.contains(where: { $0.id == command.id }) {
-            savedCommands.append(command)
+        do {
+            try dbQueue.write { db in try command.insert(db) }
+            if !savedCommands.contains(where: { $0.id == command.id }) {
+                savedCommands.append(command)
+            }
+        } catch {
+            print("Failed to insert saved command: \(error)")
         }
     }
 
     func updateSavedCommand(_ command: SavedCommand) {
-        try? dbQueue.write { db in try command.update(db) }
-        if let idx = savedCommands.firstIndex(where: { $0.id == command.id }) {
-            savedCommands[idx] = command
+        do {
+            try dbQueue.write { db in try command.update(db) }
+            if let idx = savedCommands.firstIndex(where: { $0.id == command.id }) {
+                savedCommands[idx] = command
+            }
+        } catch {
+            print("Failed to update saved command: \(error)")
         }
     }
 
     func deleteSavedCommand(id: UUID) {
-        try? dbQueue.write { db in
-            try db.execute(sql: "DELETE FROM savedCommands WHERE id = ?", arguments: [id.uuidString])
+        do {
+            try dbQueue.write { db in
+                try db.execute(sql: "DELETE FROM savedCommands WHERE id = ?", arguments: [id.uuidString])
+            }
+            savedCommands.removeAll { $0.id == id }
+        } catch {
+            print("Failed to delete saved command: \(error)")
         }
-        savedCommands.removeAll { $0.id == id }
     }
 }

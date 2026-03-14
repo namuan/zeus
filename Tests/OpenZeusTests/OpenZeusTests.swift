@@ -82,3 +82,63 @@ import Testing
     #expect(fetched.count == 1)
     #expect(fetched.first?.command == "swift run OpenZeus")
 }
+
+@Test @MainActor func legacySavedCommandsSchemaMigratesWithoutNameColumn() throws {
+    let fileManager = FileManager.default
+    let folder = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? fileManager.removeItem(at: folder) }
+
+    let path = folder.appendingPathComponent("app.db").path
+    let queue = try DatabaseQueue(path: path)
+
+    try queue.write { db in
+        try db.create(table: "grdb_migrations") { t in
+            t.primaryKey("identifier", .text)
+        }
+        for version in ["v1", "v2", "v3", "v4"] {
+            try db.execute(sql: "INSERT INTO grdb_migrations(identifier) VALUES (?)", arguments: [version])
+        }
+        try db.create(table: "projects") { t in
+            t.primaryKey("id", .text)
+            t.column("name", .text).notNull()
+            t.column("directoryURL", .text).notNull()
+        }
+        try db.create(table: "tasks") { t in
+            t.primaryKey("id", .text)
+            t.column("projectId", .text)
+            t.column("name", .text).notNull()
+            t.column("command", .text).notNull()
+            t.column("environment", .text).notNull().defaults(to: "{}")
+            t.column("workingDirectory", .text).notNull().defaults(to: "/tmp")
+            t.column("status", .text).notNull().defaults(to: "idle")
+            t.column("watchMode", .text).notNull().defaults(to: "off")
+            t.column("isArchived", .integer).notNull().defaults(to: 0)
+        }
+        try db.create(table: "savedCommands") { t in
+            t.primaryKey("id", .text)
+            t.column("projectId", .text)
+            t.column("name", .text).notNull()
+            t.column("command", .text).notNull()
+        }
+
+        let projectID = UUID().uuidString
+        try db.execute(
+            sql: "INSERT INTO projects (id, name, directoryURL) VALUES (?, ?, ?)",
+            arguments: [projectID, "Legacy", "/tmp"]
+        )
+        try db.execute(
+            sql: "INSERT INTO savedCommands (id, projectId, name, command) VALUES (?, ?, ?, ?)",
+            arguments: [UUID().uuidString, projectID, "legacy", "echo legacy"]
+        )
+    }
+
+    let reopened = try AppDatabase(path: path)
+    let project = try #require(reopened.projects.first)
+    let fetched = reopened.savedCommands(for: project.id)
+    #expect(fetched.count == 1)
+    #expect(fetched.first?.command == "echo legacy")
+
+    let columns = try queue.read { db in try db.columns(in: "savedCommands").map(\.name) }
+    #expect(columns == ["id", "projectId", "command"])
+}

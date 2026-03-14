@@ -40,7 +40,7 @@ struct QuickCommandsPopover: View {
                         }
                     }
                 }
-                .frame(maxHeight: 260)
+                .frame(maxHeight: 380)
             }
 
             Divider()
@@ -63,7 +63,7 @@ struct QuickCommandsPopover: View {
             }
             .padding(10)
         }
-        .frame(width: 320)
+        .frame(width: 440)
         .onAppear {
             addFieldFocused = commands.isEmpty
         }
@@ -85,6 +85,7 @@ private struct CommandRow: View {
     let onDelete: () -> Void
 
     @State private var isEditing = false
+    @State private var isHovered = false
     @State private var draft: String
     @FocusState private var editFieldFocused: Bool
 
@@ -133,13 +134,28 @@ private struct CommandRow: View {
                 .help("Cancel")
             } else {
                 Button(action: startEditing) {
-                    Text(command.command)
-                        .font(.callout)
-                        .fontDesign(.monospaced)
-                        .lineLimit(2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    HStack(spacing: 8) {
+                        Text(command.command)
+                            .font(.callout)
+                            .fontDesign(.monospaced)
+                            .lineLimit(2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        Image(systemName: "pencil")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .opacity(isHovered ? 1 : 0.5)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(isHovered ? Color.primary.opacity(0.08) : Color.clear)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
+                .onHover { hovering in
+                    isHovered = hovering
+                }
+                .help("Click to edit")
             }
 
             Button(action: onRun) {
