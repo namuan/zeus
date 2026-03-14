@@ -184,6 +184,18 @@ final class TerminalEntry: ObservableObject {
             await checkActiveProcess()
         }
     }
+
+    func sendCommand(_ command: String) {
+        if !tmuxUnavailable, let tmux = tmuxExecutable() {
+            let sessionName = "zeus-\(taskID.uuidString)"
+            Task {
+                await runProcessOutput(tmux, args: ["send-keys", "-t", sessionName, command, "Enter"])
+            }
+        } else {
+            let bytes = Array((command + "\n").utf8)
+            terminalView.send(data: bytes[...])
+        }
+    }
 }
 
 @discardableResult

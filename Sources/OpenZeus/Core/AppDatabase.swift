@@ -7,6 +7,7 @@ final class AppDatabase: ObservableObject {
     private let dbQueue: DatabaseQueue
     @Published private(set) var projects: [Project] = []
     @Published private(set) var tasks: [AgentTask] = []
+    @Published private(set) var savedCommands: [SavedCommand] = []
 
     private var cancellables: [AnyDatabaseCancellable] = []
 
@@ -51,6 +52,13 @@ final class AppDatabase: ObservableObject {
                 t.add(column: "isArchived", .integer).notNull().defaults(to: 0)
             }
         }
+        migrator.registerMigration("v4") { db in
+            try db.create(table: "savedCommands") { t in
+                t.primaryKey("id", .text)
+                t.column("projectId", .text).references("projects", onDelete: .cascade)
+                t.column("command", .text).notNull()
+            }
+        }
         try migrator.migrate(db)
     }
 
@@ -69,6 +77,13 @@ final class AppDatabase: ObservableObject {
                 .tracking { db in try AgentTask.fetchAll(db) }
                 .start(in: dbQueue, scheduling: .immediate, onError: { _ in }, onChange: { [weak self] in
                     self?.tasks = $0
+                })
+        )
+        cancellables.append(
+            ValueObservation
+                .tracking { db in try SavedCommand.fetchAll(db) }
+                .start(in: dbQueue, scheduling: .immediate, onError: { _ in }, onChange: { [weak self] in
+                    self?.savedCommands = $0
                 })
         )
     }
@@ -106,6 +121,26 @@ final class AppDatabase: ObservableObject {
     func deleteTask(id: UUID) {
         try? dbQueue.write { db in
             try db.execute(sql: "DELETE FROM tasks WHERE id = ?", arguments: [id.uuidString])
+        }
+    }
+
+    // MARK: - Saved Commands
+
+    func savedCommands(for projectID: UUID) -> [SavedCommand] {
+        savedCommands.filter { $0.projectID == projectID }
+    }
+
+    func insertSavedCommand(_ command: SavedCommand) {
+        try? dbQueue.write { db in try command.insert(db) }
+    }
+
+    func updateSavedCommand(_ command: SavedCommand) {
+        try? dbQueue.write { db in try command.update(db) }
+    }
+
+    func deleteSavedCommand(id: UUID) {
+        try? dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM savedCommands WHERE id = ?", arguments: [id.uuidString])
         }
     }
 }

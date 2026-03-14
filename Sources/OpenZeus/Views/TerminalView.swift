@@ -27,7 +27,7 @@ private struct TerminalPaneContent: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if !entry.tmuxUnavailable {
-                WindowControlBar(entry: entry)
+                WindowControlBar(entry: entry, projectID: task.projectID)
                 Divider()
             }
             if entry.tmuxUnavailable {
@@ -46,6 +46,8 @@ private struct TerminalPaneContent: View {
 
 private struct WindowControlBar: View {
     @ObservedObject var entry: TerminalEntry
+    let projectID: UUID
+    @State private var showCommands = false
 
     var body: some View {
         HStack(spacing: 6) {
@@ -117,6 +119,19 @@ private struct WindowControlBar: View {
             }
             .disabled(entry.windows.count <= 1)
             .help("Close Window")
+
+            Divider().frame(height: 16)
+
+            Button { showCommands.toggle() } label: {
+                Image(systemName: "bolt.fill")
+            }
+            .help("Quick Commands")
+            .popover(isPresented: $showCommands) {
+                QuickCommandsPopover(projectID: projectID) { command in
+                    entry.sendCommand(command)
+                    showCommands = false
+                }
+            }
         }
         .buttonStyle(.borderless)
         .padding(.horizontal, 10)

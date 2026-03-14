@@ -1,0 +1,30 @@
+import Foundation
+import GRDB
+
+struct SavedCommand: Identifiable {
+    var id: UUID
+    var projectID: UUID
+    var command: String
+}
+
+extension SavedCommand: Equatable {
+    static func == (lhs: SavedCommand, rhs: SavedCommand) -> Bool { lhs.id == rhs.id }
+}
+
+extension SavedCommand: FetchableRecord {
+    init(row: Row) throws {
+        id = UUID(uuidString: row["id"]) ?? UUID()
+        projectID = UUID(uuidString: row["projectId"]) ?? UUID()
+        command = row["command"]
+    }
+}
+
+extension SavedCommand: PersistableRecord {
+    static var databaseTableName: String { "savedCommands" }
+
+    func encode(to container: inout PersistenceContainer) throws {
+        container["id"] = id.uuidString
+        container["projectId"] = projectID.uuidString
+        container["command"] = command
+    }
+}
