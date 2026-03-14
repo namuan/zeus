@@ -18,6 +18,7 @@ final class TerminalEntry: ObservableObject {
     @Published var tmuxUnavailable = false
     @Published var windows: [TmuxWindow] = []
     @Published var currentWindowIndex: Int = 0
+    @Published var paneCount: Int = 1
     var workingDirectory: String = ""
 
     private let delegate: TerminalEntryDelegate
@@ -63,10 +64,15 @@ final class TerminalEntry: ObservableObject {
             "list-windows", "-t", sessionName, "-F",
             "#{window_index}\t#{window_name}\t#{window_active}",
         ])
-        let (commandOutput, windowsOutput) = await (commandFuture, windowsFuture)
+        async let panesFuture = runProcessOutput(tmux, args: [
+            "list-panes", "-t", sessionName,
+        ])
+        let (commandOutput, windowsOutput, panesOutput) = await (commandFuture, windowsFuture, panesFuture)
         let command = commandOutput.trimmingCharacters(in: .whitespacesAndNewlines)
         hasActiveProcess = !command.isEmpty && !Self.knownShells.contains(command)
         parseWindowState(windowsOutput)
+        let count = panesOutput.split(separator: "\n").filter { !$0.isEmpty }.count
+        paneCount = max(1, count)
     }
 
     private func parseWindowState(_ output: String) {
@@ -144,6 +150,16 @@ final class TerminalEntry: ObservableObject {
         }
         Task {
             await runProcessOutput(tmux, args: args)
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            await checkActiveProcess()
+        }
+    }
+
+    func rotatePane() {
+        guard let tmux = tmuxExecutable() else { return }
+        let sessionName = "zeus-\(taskID.uuidString)"
+        Task {
+            await runProcessOutput(tmux, args: ["select-pane", "-t", "\(sessionName):.+"])
             try? await Task.sleep(nanoseconds: 200_000_000)
             await checkActiveProcess()
         }

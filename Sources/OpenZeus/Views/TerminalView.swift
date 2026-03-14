@@ -106,6 +106,12 @@ private struct WindowControlBar: View {
             }
             .help("Split Pane Vertically")
 
+            Button { entry.rotatePane() } label: {
+                Image(systemName: "rectangle.2.swap")
+            }
+            .disabled(entry.paneCount <= 1)
+            .help("Rotate Panes")
+
             Button { entry.closeWindow() } label: {
                 Image(systemName: "xmark")
             }
