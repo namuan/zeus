@@ -51,34 +51,6 @@ private struct WindowControlBar: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 3) {
-                    ForEach(entry.windows, id: \.index) { window in
-                        Button { entry.selectWindow(index: window.index) } label: {
-                            Text(window.name)
-                                .font(.caption)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(
-                                    window.index == entry.currentWindowIndex
-                                        ? Color.accentColor
-                                        : Color.primary.opacity(0.1)
-                                )
-                                .foregroundStyle(
-                                    window.index == entry.currentWindowIndex
-                                        ? Color.white
-                                        : Color.primary
-                                )
-                                .clipShape(RoundedRectangle(cornerRadius: 4))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.vertical, 4)
-            }
-
-            Divider().frame(height: 16)
-
             Button { entry.openWindow() } label: {
                 Image(systemName: "plus")
             }
@@ -132,11 +104,44 @@ private struct WindowControlBar: View {
                     showCommands = false
                 }
             }
+
+            Divider().frame(height: 16)
+
+            Spacer()
         }
         .buttonStyle(.borderless)
         .padding(.horizontal, 10)
         .padding(.vertical, 2)
         .background(.bar)
+        .overlay(alignment: .trailing) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 3) {
+                    ForEach(entry.windows, id: \.index) { window in
+                        Button { entry.selectWindow(index: window.index) } label: {
+                            Text(window.name)
+                                .font(.caption)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(
+                                    window.index == entry.currentWindowIndex
+                                        ? Color.accentColor
+                                        : Color.primary.opacity(0.1)
+                                )
+                                .foregroundStyle(
+                                    window.index == entry.currentWindowIndex
+                                        ? Color.white
+                                        : Color.primary
+                                )
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.trailing, 10)
+        }
     }
 }
 
