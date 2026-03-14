@@ -185,16 +185,31 @@ final class TerminalEntry: ObservableObject {
         }
     }
 
-    func sendCommand(_ command: String) {
+    func sendCommand(_ command: String, inNewVerticalPane: Bool = false) {
         if !tmuxUnavailable, let tmux = tmuxExecutable() {
             let sessionName = "zeus-\(taskID.uuidString)"
             Task {
-                await runProcessOutput(tmux, args: ["send-keys", "-t", sessionName, command, "Enter"])
+                let target = inNewVerticalPane
+                    ? await createVerticalPane(using: tmux, sessionName: sessionName)
+                    : sessionName
+                await runProcessOutput(tmux, args: ["send-keys", "-t", target, command, "Enter"])
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                await checkActiveProcess()
             }
         } else {
             let bytes = Array((command + "\n").utf8)
             terminalView.send(data: bytes[...])
         }
+    }
+
+    private func createVerticalPane(using tmux: String, sessionName: String) async -> String {
+        var args = ["split-window", "-h", "-P", "-F", "#{pane_id}", "-t", sessionName]
+        if !workingDirectory.isEmpty {
+            args += ["-c", workingDirectory]
+        }
+        let output = await runProcessOutput(tmux, args: args)
+        let paneID = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        return paneID.isEmpty ? sessionName : paneID
     }
 }
 

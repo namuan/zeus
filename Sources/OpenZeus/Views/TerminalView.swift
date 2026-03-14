@@ -101,7 +101,7 @@ private struct WindowControlBar: View {
             .help("Quick Commands")
             .popover(isPresented: $showCommands) {
                 QuickCommandsPopover(projectID: projectID) { command in
-                    entry.sendCommand(command)
+                    entry.sendCommand(command, inNewVerticalPane: true)
                     showCommands = false
                 }
                 .environmentObject(db)
@@ -261,4 +261,3 @@ private struct TerminalRepresentable: NSViewRepresentable {
         }
     }
 }
-

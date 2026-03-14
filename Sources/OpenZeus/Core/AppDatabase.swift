@@ -11,17 +11,25 @@ final class AppDatabase: ObservableObject {
 
     private var cancellables: [AnyDatabaseCancellable] = []
 
-    init() throws {
+    convenience init() throws {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let folder = appSupport.appendingPathComponent("OpenZeus", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        dbQueue = try DatabaseQueue(path: folder.appendingPathComponent("app.db").path)
+        try self.init(path: folder.appendingPathComponent("app.db").path)
+    }
+
+    init(path: String) throws {
+        dbQueue = try DatabaseQueue(path: path)
         try Self.migrate(dbQueue)
         startObserving()
     }
 
-    init(inMemory: Void) throws {
-        dbQueue = try DatabaseQueue(path: ":memory:")
+    convenience init(inMemory: Void) throws {
+        try self.init(path: ":memory:")
+    }
+
+    init(databaseQueue: DatabaseQueue) throws {
+        dbQueue = databaseQueue
         try Self.migrate(dbQueue)
         startObserving()
     }
