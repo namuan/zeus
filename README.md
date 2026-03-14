@@ -2,16 +2,30 @@
 
 Native macOS AI agent orchestrator. Visual control plane for managing fleets of AI agents.
 
-## Build
+![](assets/intro.png)
+
+## Features
+
+- **Three-column layout** — Projects, Tasks, and Terminal side by side
+- **Persistent terminal sessions** — tmux-backed sessions survive app restarts; attach to a running agent anytime
+- **Multi-window terminals** — open, close, split (horizontal/vertical), and rotate panes per task
+- **Watch mode** — get a macOS notification and/or sound alert when an agent goes idle
+- **Quick commands** — save and one-click-run shell commands per project
+- **Task archiving** — hide completed tasks without losing their terminal history
+
+## Install
 
 ```bash
-swift build
-swift run OpenZeus
+./install.command
 ```
 
-## Test
+Builds a release binary, creates `OpenZeus.app`, installs it to `~/Applications`, and launches it. Requires Xcode Command Line Tools (`xcode-select --install`).
+
+## Development
 
 ```bash
+swift build       # debug build
+swift run OpenZeus
 swift test
 ```
 
@@ -19,7 +33,7 @@ swift test
 
 - macOS 15+
 - Swift 6+
-- SwiftTerm (fetched automatically via SPM)
+- tmux (recommended — `brew install tmux`)
 
 ## License
 
