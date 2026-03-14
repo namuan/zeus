@@ -465,7 +465,14 @@ private struct TerminalRepresentable: NSViewRepresentable {
             ])
         }
 
-        guard terminalView.process?.running != true else {
+        if terminalView.process?.running == true {
+            if let sessionName = container.sessionName, let tmux = tmuxExecutable() {
+                Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    logDebug("TerminalRepresentable.updateNSView: ensuring tmux mouse mode is enabled")
+                    await runProcessOutput(tmux, args: ["set-option", "-t", sessionName, "mouse", "on"])
+                }
+            }
             logDebug("TerminalRepresentable.updateNSView: process already running, skipping")
             return
         }
@@ -485,13 +492,12 @@ private struct TerminalRepresentable: NSViewRepresentable {
                 args: ["new-session", "-A", "-s", sessionName, shell, "-l"],
                 currentDirectory: cwd
             )
-            // Disable mouse mode for this session so tmux does not send
-            // mouse-tracking escape sequences that would intercept SwiftTerm's
-            // native text-selection handlers.
+            // Enable mouse mode so clicking switches panes and tmux can handle
+            // mouse interactions inside the session.
             Task {
                 try? await Task.sleep(nanoseconds: 300_000_000)
-                logDebug("TerminalRepresentable.updateNSView: disabling tmux mouse mode")
-                await runProcessOutput(tmux, args: ["set-option", "-t", sessionName, "mouse", "off"])
+                logDebug("TerminalRepresentable.updateNSView: enabling tmux mouse mode")
+                await runProcessOutput(tmux, args: ["set-option", "-t", sessionName, "mouse", "on"])
             }
         } else {
             logWarning("TerminalRepresentable.updateNSView: tmux not found, using direct shell")
