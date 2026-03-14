@@ -2,6 +2,7 @@ import SwiftUI
 
 struct TaskList: View {
     @EnvironmentObject var appDatabase: AppDatabase
+    @EnvironmentObject var terminalStore: TerminalStore
     let project: Project
     @Binding var selection: AgentTask?
     @State private var showingNewTask = false
@@ -71,6 +72,7 @@ struct TaskList: View {
 
     private func archiveTask(_ task: AgentTask) {
         if selection == task { selection = nil }
+        if !task.isArchived { terminalStore.killSession(for: task.id) }
         var updated = task
         updated.isArchived = !task.isArchived
         appDatabase.updateTask(updated)

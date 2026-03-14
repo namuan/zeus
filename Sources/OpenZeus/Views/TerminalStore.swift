@@ -261,6 +261,20 @@ final class TerminalStore: ObservableObject {
         entries[taskID]?.workingDirectory = workingDirectory
     }
 
+    /// Kill the tmux session for a task and remove it from the cache.
+    func killSession(for taskID: UUID) {
+        entries[taskID]?.isRunning = false
+        entries.removeValue(forKey: taskID)
+        if let tmux = tmuxExecutable() {
+            let sessionName = "zeus-\(taskID.uuidString)"
+            Task {
+                await runProcessOutput(tmux, args: ["kill-session", "-t", sessionName])
+            }
+        }
+        activeProcessTaskIDs.remove(taskID)
+        attentionTaskIDs.remove(taskID)
+    }
+
     /// Clear the attention state when the user opens the task's terminal.
     func clearAttention(taskID: UUID) {
         attentionTaskIDs.remove(taskID)
