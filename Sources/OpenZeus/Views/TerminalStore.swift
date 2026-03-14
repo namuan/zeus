@@ -426,6 +426,7 @@ final class TerminalStore: ObservableObject {
     @Published private(set) var activeProcessTaskIDs: Set<UUID> = []
     @Published private(set) var attentionTaskIDs: Set<UUID> = []
     private var cancellables: Set<AnyCancellable> = []
+    private var periodicCleanupTask: Task<Void, Never>?
 
     // Per-task metadata needed to fire notifications without a DB lookup
     private var taskMetadata: [UUID: (name: String, watchMode: WatchMode)] = [:]
@@ -436,6 +437,7 @@ final class TerminalStore: ObservableObject {
         if let monitor = optionKeyMonitor {
             NSEvent.removeMonitor(monitor)
         }
+        periodicCleanupTask?.cancel()
     }
 
     func entry(for id: UUID) -> TerminalEntry {
@@ -508,6 +510,7 @@ final class TerminalStore: ObservableObject {
             let sessionName = "zeus-\(taskID.uuidString)"
             logDebug("TerminalStore.killSession: killing tmux session \(sessionName)")
             Task {
+                await terminateSessionProcesses(sessionName: sessionName, tmux: tmux)
                 await runProcessOutput(tmux, args: ["kill-session", "-t", sessionName])
             }
         } else {
@@ -522,6 +525,73 @@ final class TerminalStore: ObservableObject {
         logDebug("TerminalStore.clearAttention: task=\(taskID.uuidString)")
         attentionTaskIDs.remove(taskID)
     }
+
+    /// Kill any `zeus-*` tmux sessions whose task ID is not in `keepingTaskIDs`.
+    /// Pass the IDs of all non-archived tasks so sessions for deleted or archived tasks are cleaned up.
+    func cleanupOrphanedSessions(keepingTaskIDs: Set<UUID>) {
+        guard let tmux = tmuxExecutable() else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let output = await runProcessOutput(tmux, args: ["list-sessions", "-F", "#{session_name}"])
+            let orphans = output
+                .components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { $0.hasPrefix("zeus-") }
+                .compactMap { session -> (session: String, taskID: UUID)? in
+                    let uuidString = String(session.dropFirst("zeus-".count))
+                    guard let id = UUID(uuidString: uuidString) else { return nil }
+                    return (session, id)
+                }
+                .filter { !keepingTaskIDs.contains($0.taskID) }
+            guard !orphans.isEmpty else { return }
+            logInfo("TerminalStore.cleanupOrphanedSessions: found \(orphans.count) orphaned session(s)")
+            for (session, taskID) in orphans {
+                logInfo("TerminalStore.cleanupOrphanedSessions: killing \(session)")
+                await terminateSessionProcesses(sessionName: session, tmux: tmux)
+                await runProcessOutput(tmux, args: ["kill-session", "-t", session])
+                entries[taskID]?.isRunning = false
+                entries.removeValue(forKey: taskID)
+                activeProcessTaskIDs.remove(taskID)
+                attentionTaskIDs.remove(taskID)
+            }
+        }
+    }
+
+    /// Start a repeating cleanup that kills orphaned tmux sessions.
+    /// `taskIDsProvider` is called each interval to get the current set of task IDs to preserve.
+    func startPeriodicCleanup(interval: TimeInterval = 300, taskIDsProvider: @escaping @MainActor () -> Set<UUID>) {
+        periodicCleanupTask?.cancel()
+        periodicCleanupTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            // Run once immediately at startup
+            cleanupOrphanedSessions(keepingTaskIDs: taskIDsProvider())
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(interval))
+                guard !Task.isCancelled else { break }
+                cleanupOrphanedSessions(keepingTaskIDs: taskIDsProvider())
+            }
+        }
+    }
+}
+
+/// Send SIGTERM to all child processes of each pane in a tmux session, then wait briefly
+/// for them to handle the signal before the caller kills the session.
+nonisolated func terminateSessionProcesses(sessionName: String, tmux: String) async {
+    let paneOutput = await runProcessOutput(
+        tmux, args: ["list-panes", "-s", "-t", sessionName, "-F", "#{pane_pid}"]
+    )
+    let panePIDs = paneOutput
+        .components(separatedBy: .newlines)
+        .map { $0.trimmingCharacters(in: .whitespaces) }
+        .filter { !$0.isEmpty }
+    guard !panePIDs.isEmpty else { return }
+    logDebug("terminateSessionProcesses: \(sessionName) has \(panePIDs.count) pane(s)")
+    for pid in panePIDs {
+        logDebug("terminateSessionProcesses: SIGTERM children of pane shell pid=\(pid)")
+        await runProcessOutput("/usr/bin/pkill", args: ["-TERM", "-P", pid])
+    }
+    // Brief grace period for processes to handle SIGTERM before the session is killed.
+    try? await Task.sleep(for: .milliseconds(300))
 }
 
 func tmuxExecutable() -> String? {

@@ -44,6 +44,9 @@ struct ProjectList: View {
 
     private func removeProject(_ project: Project) {
         if selection == project { selection = nil }
+        for task in appDatabase.tasks(for: project.id) {
+            terminalStore.killSession(for: task.id)
+        }
         appDatabase.deleteProject(id: project.id)
     }
 

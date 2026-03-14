@@ -2,13 +2,19 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject var appDatabase: AppDatabase
+    @EnvironmentObject var terminalStore: TerminalStore
     @State private var selectedProject: Project?
     @State private var selectedTask: AgentTask?
     @AppStorage("lastSelectedProjectID") private var lastSelectedProjectID = ""
 
     var body: some View {
         splitView
-            .task { restoreSelection() }
+            .task {
+                restoreSelection()
+                terminalStore.startPeriodicCleanup {
+                    Set(appDatabase.tasks.filter { !$0.isArchived }.map { $0.id })
+                }
+            }
             .onChange(of: selectedTask) { _, newTask in
                 saveTaskSelection(newTask)
             }
