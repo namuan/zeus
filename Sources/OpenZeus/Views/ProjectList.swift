@@ -59,6 +59,8 @@ private struct ProjectRow: View {
     let hasActiveProcess: Bool
     let onRemove: () -> Void
 
+    @State private var isHovered = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .center, spacing: 6) {
@@ -84,11 +86,18 @@ private struct ProjectRow: View {
                     .padding(.top, 2)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 2)
-        .contextMenu {
-            Button(role: .destructive, action: onRemove) {
-                Label("Remove from App", systemImage: "minus.circle")
+        .overlay(alignment: .trailing) {
+            if isHovered {
+                Button(action: onRemove) {
+                    Image(systemName: "trash")
+                        .foregroundStyle(.red)
+                }
+                .buttonStyle(.borderless)
+                .help("Remove from App")
             }
         }
+        .onHover { isHovered = $0 }
     }
 }
