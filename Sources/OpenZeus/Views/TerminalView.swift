@@ -58,9 +58,7 @@ private struct WindowControlBar: View {
     @EnvironmentObject var db: AppDatabase
     @State private var showCommands = false
     @StateObject private var gitService: GitService
-    @State private var showCommitPopover = false
     @State private var showRevertConfirmation = false
-    @State private var commitMessage = ""
 
     init(entry: TerminalEntry, projectID: UUID, workingDirectory: String) {
         logDebug("WindowControlBar.init: projectID=\(projectID), windows.count=\(entry.windows.count)")
@@ -272,43 +270,6 @@ private struct WindowControlBar: View {
         }
 
         if gitService.stats?.hasChanges == true {
-            // Stage all
-            Button { Task { await gitService.stageAll() } } label: {
-                Image(systemName: "plus.circle")
-            }
-            .help("Stage All Changes")
-
-            // Commit button with popover
-            Button { showCommitPopover = true } label: {
-                Image(systemName: "checkmark.circle")
-            }
-            .help("Commit Changes")
-            .popover(isPresented: $showCommitPopover) {
-                CommitPopover(
-                    message: $commitMessage,
-                    stats: gitService.stats,
-                    onCommit: { message in
-                        Task {
-                            let result = await gitService.stageAndCommit(message: message)
-                            if result.success {
-                                showCommitPopover = false
-                                commitMessage = ""
-                            }
-                        }
-                    },
-                    onCommitAndPush: { message in
-                        Task {
-                            let result = await gitService.stageCommitAndPush(message: message)
-                            if result.success {
-                                showCommitPopover = false
-                                commitMessage = ""
-                            }
-                        }
-                    }
-                )
-                .frame(width: 320)
-            }
-
             // Revert changes with confirmation
             Button { showRevertConfirmation = true } label: {
                 Image(systemName: "arrow.uturn.backward")
@@ -423,53 +384,6 @@ private struct AppLauncherButton: View {
     }
 }
 
-// MARK: - Commit Popover
-
-private struct CommitPopover: View {
-    @Binding var message: String
-    let stats: GitStats?
-    let onCommit: (String) -> Void
-    let onCommitAndPush: (String) -> Void
-    @FocusState private var isFocused: Bool
-
-    private var trimmedMessage: String {
-        message.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Commit Changes")
-                .font(.headline)
-
-            if let stats {
-                Text("\(stats.staged) staged, \(stats.unstaged) unstaged, \(stats.untracked) untracked")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            TextField("Commit message", text: $message, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
-                .lineLimit(3...6)
-                .focused($isFocused)
-
-            HStack(spacing: 8) {
-                Button("Commit") {
-                    onCommit(trimmedMessage)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(trimmedMessage.isEmpty)
-
-                Button("Commit & Push") {
-                    onCommitAndPush(trimmedMessage)
-                }
-                .buttonStyle(.bordered)
-                .disabled(trimmedMessage.isEmpty)
-            }
-        }
-        .padding()
-        .onAppear { isFocused = true }
-    }
-}
 
 private class TerminalContainerView: NSView {
     var sessionName: String?
