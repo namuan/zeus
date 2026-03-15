@@ -1,0 +1,1 @@
+Fix Shift+Enter not working in terminal sessions. Added NSEvent monitor to intercept Shift+Return and inject ESC[13;2u via tmux send-keys -l directly into the active pane, bypassing SwiftTerms key encoding. Also fixed a flaky test race condition under parallel load.
