@@ -12,22 +12,26 @@ struct TerminalPane: View {
             sessionID: task.id,
             projectID: task.projectID,
             command: task.command,
-            workingDirectory: task.workingDirectory.path(percentEncoded: false),
+            workingDirectory: task.effectiveWorkingDirectory,
             navigationTitle: task.name,
             entry: terminalStore.entry(for: task.id)
         )
         .onAppear {
-            logInfo("TerminalPane.onAppear: task=\(task.name), watchMode=\(task.watchMode), cwd='\(task.workingDirectory.path(percentEncoded: false))'")
-            terminalStore.updateTaskMetadata(taskID: task.id, name: task.name, watchMode: task.watchMode, workingDirectory: task.workingDirectory.path(percentEncoded: false))
+            logInfo("TerminalPane.onAppear: task=\(task.name), watchMode=\(task.watchMode), cwd='\(task.effectiveWorkingDirectory)'")
+            terminalStore.updateTaskMetadata(taskID: task.id, name: task.name, watchMode: task.watchMode, workingDirectory: task.effectiveWorkingDirectory)
             terminalStore.clearAttention(taskID: task.id)
         }
         .onChange(of: task.watchMode) { _, newMode in
             logInfo("TerminalPane.onChange watchMode: \(newMode)")
-            terminalStore.updateTaskMetadata(taskID: task.id, name: task.name, watchMode: newMode, workingDirectory: task.workingDirectory.path(percentEncoded: false))
+            terminalStore.updateTaskMetadata(taskID: task.id, name: task.name, watchMode: newMode, workingDirectory: task.effectiveWorkingDirectory)
         }
         .onChange(of: task.name) { _, newName in
             logInfo("TerminalPane.onChange name: '\(newName)'")
-            terminalStore.updateTaskMetadata(taskID: task.id, name: newName, watchMode: task.watchMode, workingDirectory: task.workingDirectory.path(percentEncoded: false))
+            terminalStore.updateTaskMetadata(taskID: task.id, name: newName, watchMode: task.watchMode, workingDirectory: task.effectiveWorkingDirectory)
+        }
+        .onChange(of: task.worktreePath) { _, _ in
+            logInfo("TerminalPane.onChange worktreePath: '\(task.effectiveWorkingDirectory)'")
+            terminalStore.updateTaskMetadata(taskID: task.id, name: task.name, watchMode: task.watchMode, workingDirectory: task.effectiveWorkingDirectory)
         }
     }
 }

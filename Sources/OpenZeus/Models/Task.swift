@@ -13,6 +13,14 @@ struct AgentTask: Identifiable {
     var terminalState: TerminalState?
     var watchMode: WatchMode = .off
     var isArchived: Bool = false
+    var worktreePath: String?
+    var worktreeBranch: String?
+
+    /// The directory the terminal should open in.
+    /// Uses the worktree path when one has been created, otherwise the task's working directory.
+    var effectiveWorkingDirectory: String {
+        worktreePath ?? workingDirectory.path(percentEncoded: false)
+    }
 }
 
 extension AgentTask: Equatable {
@@ -36,6 +44,8 @@ extension AgentTask: FetchableRecord {
         }
         watchMode = WatchMode(rawValue: row["watchMode"] as? String ?? "") ?? .off
         isArchived = (row["isArchived"] as? Int64 ?? 0) != 0
+        worktreePath = row["worktreePath"]
+        worktreeBranch = row["worktreeBranch"]
     }
 }
 
@@ -59,5 +69,7 @@ extension AgentTask: PersistableRecord {
         }
         container["watchMode"] = watchMode.rawValue
         container["isArchived"] = isArchived ? 1 : 0
+        container["worktreePath"] = worktreePath
+        container["worktreeBranch"] = worktreeBranch
     }
 }

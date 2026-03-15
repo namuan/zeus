@@ -199,42 +199,47 @@ final class GitService: ObservableObject {
     // MARK: - Private Helpers
 
     private func runGit(args: [String]) async -> GitCommandResult {
-        await withCheckedContinuation { continuation in
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: self.gitExecutablePath)
-            process.arguments = args
-            process.currentDirectoryURL = URL(fileURLWithPath: workingDirectory)
+        await runGitCommand(args: args, in: workingDirectory, executablePath: gitExecutablePath)
+    }
+}
 
-            let outputPipe = Pipe()
-            let errorPipe = Pipe()
-            process.standardOutput = outputPipe
-            process.standardError = errorPipe
+// MARK: - Shared Git Runner
 
-            process.terminationHandler = { _ in
-                let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-                let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+/// Runs a git command and returns the result. Shared by all git-based services.
+func runGitCommand(args: [String], in workingDirectory: String, executablePath: String) async -> GitCommandResult {
+    await withCheckedContinuation { continuation in
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executablePath)
+        process.arguments = args
+        process.currentDirectoryURL = URL(fileURLWithPath: workingDirectory)
 
-                let output = String(data: outputData, encoding: .utf8) ?? ""
-                let error = String(data: errorData, encoding: .utf8) ?? ""
+        let outputPipe = Pipe()
+        let errorPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = errorPipe
 
-                continuation.resume(returning: GitCommandResult(
-                    success: process.terminationStatus == 0,
-                    output: output.trimmingCharacters(in: .whitespacesAndNewlines),
-                    error: error.trimmingCharacters(in: .whitespacesAndNewlines),
-                    exitCode: Int(process.terminationStatus)
-                ))
-            }
+        process.terminationHandler = { _ in
+            let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+            let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+            let output = String(data: outputData, encoding: .utf8) ?? ""
+            let error = String(data: errorData, encoding: .utf8) ?? ""
+            continuation.resume(returning: GitCommandResult(
+                success: process.terminationStatus == 0,
+                output: output.trimmingCharacters(in: .whitespacesAndNewlines),
+                error: error.trimmingCharacters(in: .whitespacesAndNewlines),
+                exitCode: Int(process.terminationStatus)
+            ))
+        }
 
-            do {
-                try process.run()
-            } catch {
-                continuation.resume(returning: GitCommandResult(
-                    success: false,
-                    output: "",
-                    error: error.localizedDescription,
-                    exitCode: -1
-                ))
-            }
+        do {
+            try process.run()
+        } catch {
+            continuation.resume(returning: GitCommandResult(
+                success: false,
+                output: "",
+                error: error.localizedDescription,
+                exitCode: -1
+            ))
         }
     }
 }

@@ -24,6 +24,9 @@ struct SettingsView: View {
                 GitTab(config: $config.git)
                     .tabItem { Label("Git", systemImage: "arrow.triangle.branch") }
 
+                WorktreeTab(config: $config.worktree)
+                    .tabItem { Label("Worktree", systemImage: "square.split.2x1") }
+
                 InterfaceTab(config: $config.ui)
                     .tabItem { Label("Interface", systemImage: "sidebar.left") }
 
@@ -203,6 +206,62 @@ private struct GitTab: View {
         panel.prompt = "Select"
         if panel.runModal() == .OK, let url = panel.url {
             config.executablePath = url.path
+        }
+    }
+}
+
+// MARK: - Worktree
+
+private struct WorktreeTab: View {
+    @Binding var config: WorktreeConfig
+
+    var body: some View {
+        Form {
+            Section("Base Directory") {
+                HStack {
+                    TextField("Path (e.g. ~/worktrees)", text: $config.basePath)
+                        .help("Root folder where all task worktrees are created. Supports ~ for home directory.")
+                    Button("Browse…") { browseForDirectory() }
+                }
+                Text("Worktrees are placed at {path}/{project}/{task-uuid}.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Branching") {
+                TextField("Base branch", text: $config.defaultBaseBranch)
+                    .help("Branch to base new task branches on (e.g. main, develop).")
+                Text("New branches are named task-{short-id}-{slug}.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if config.basePath.isEmpty {
+                Section {
+                    Label {
+                        Text("Set a base directory above to enable worktree creation when adding tasks.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } icon: {
+                        Image(systemName: "info.circle")
+                            .foregroundStyle(.blue)
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private func browseForDirectory() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.message = "Choose the worktree base directory"
+        panel.prompt = "Select"
+        if panel.runModal() == .OK, let url = panel.url {
+            config.basePath = url.path
         }
     }
 }

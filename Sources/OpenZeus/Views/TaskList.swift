@@ -3,6 +3,7 @@ import SwiftUI
 struct TaskList: View {
     @EnvironmentObject var appDatabase: AppDatabase
     @EnvironmentObject var terminalStore: TerminalStore
+    @Environment(\.appConfig) private var appConfig
     let project: Project
     @Binding var selection: AgentTask?
     @State private var showingNewTask = false
@@ -91,7 +92,22 @@ struct TaskList: View {
     private func deleteTask(_ task: AgentTask) {
         if selection == task { selection = nil }
         terminalStore.killSession(for: task.id)
+        removeWorktreeIfNeeded(for: task)
         appDatabase.deleteTask(id: task.id)
+    }
+
+    private func removeWorktreeIfNeeded(for task: AgentTask) {
+        guard let worktreePath = task.worktreePath,
+              let worktreeBranch = task.worktreeBranch else { return }
+        let repoPath = project.directoryURL.path(percentEncoded: false)
+        let service = WorktreeService(gitExecutablePath: appConfig.git.executablePath)
+        Task {
+            await service.removeWorktree(
+                worktreePath: worktreePath,
+                repoPath: repoPath,
+                branchName: worktreeBranch
+            )
+        }
     }
 
     private func deleteTasks(offsets: IndexSet) {
@@ -107,8 +123,11 @@ struct NewTaskSheet: View {
     var onCreated: (AgentTask) -> Void = { _ in }
 
     @State private var text = ""
+    @State private var createWorktree = false
 
     private static let placeholder = "Task title…\n\nTask description…"
+
+    private var worktreeConfigured: Bool { !appConfig.worktree.resolvedBasePath.isEmpty }
 
     var body: some View {
         VStack(spacing: 16) {
@@ -131,6 +150,19 @@ struct NewTaskSheet: View {
                             .allowsHitTesting(false)
                     }
                 }
+
+            Toggle(isOn: $createWorktree) {
+                HStack(spacing: 6) {
+                    Text("Create Git worktree")
+                    if !worktreeConfigured {
+                        Text("(configure path in Settings > Worktree)")
+                            .foregroundStyle(.secondary)
+                            .font(.caption)
+                    }
+                }
+            }
+            .disabled(!worktreeConfigured)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             HStack {
                 Button("Discard") { dismiss() }
@@ -161,6 +193,33 @@ struct NewTaskSheet: View {
         appDatabase.insertTask(task)
         dismiss()
         onCreated(task)
+
+        if createWorktree {
+            let taskID = task.id
+            let taskName = task.name
+            let repoPath = project.directoryURL.path(percentEncoded: false)
+            let projectSlug = WorktreeService.projectSlug(from: project.name)
+            let worktreeConfig = appConfig.worktree
+            let service = WorktreeService(gitExecutablePath: appConfig.git.executablePath)
+            Task { @MainActor in
+                do {
+                    let result = try await service.createWorktree(
+                        taskID: taskID,
+                        taskName: taskName,
+                        repoPath: repoPath,
+                        projectSlug: projectSlug,
+                        config: worktreeConfig
+                    )
+                    if var updated = appDatabase.task(id: taskID) {
+                        updated.worktreePath = result.path
+                        updated.worktreeBranch = result.branch
+                        appDatabase.updateTask(updated)
+                    }
+                } catch {
+                    print("[WorktreeService] Failed to create worktree: \(error.localizedDescription)")
+                }
+            }
+        }
     }
 }
 
@@ -199,6 +258,9 @@ private struct TaskRow: View {
                 }
                 if terminalStore.activeProcessTaskIDs.contains(task.id) {
                     ActiveProcessBadge()
+                }
+                if task.worktreePath != nil {
+                    WorktreeBadge(branch: task.worktreeBranch)
                 }
                 if terminalStore.attentionTaskIDs.contains(task.id) {
                     Image(systemName: "bell.badge.fill")
@@ -348,6 +410,29 @@ private struct ActiveProcessBadge: View {
         .padding(.vertical, 2)
         .background(.green.opacity(0.12))
         .clipShape(Capsule())
+    }
+}
+
+private struct WorktreeBadge: View {
+    let branch: String?
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "square.split.2x1")
+                .font(.caption2)
+            if let branch {
+                Text(branch)
+                    .font(.caption2)
+                    .fontWeight(.medium)
+                    .lineLimit(1)
+            }
+        }
+        .foregroundStyle(.purple)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(.purple.opacity(0.12))
+        .clipShape(Capsule())
+        .help(branch.map { "Worktree branch: \($0)" } ?? "Worktree active")
     }
 }
 

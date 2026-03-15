@@ -10,6 +10,7 @@ struct AppConfig: Codable, Equatable, Sendable {
     var storage: StorageConfig
     var git: GitConfig
     var ui: UIConfig
+    var worktree: WorktreeConfig
 
     init(
         terminal: TerminalConfig = .init(),
@@ -17,7 +18,8 @@ struct AppConfig: Codable, Equatable, Sendable {
         notifications: NotificationConfig = .init(),
         storage: StorageConfig = .init(),
         git: GitConfig = .init(),
-        ui: UIConfig = .init()
+        ui: UIConfig = .init(),
+        worktree: WorktreeConfig = .init()
     ) {
         self.terminal = terminal
         self.logging = logging
@@ -25,6 +27,7 @@ struct AppConfig: Codable, Equatable, Sendable {
         self.storage = storage
         self.git = git
         self.ui = ui
+        self.worktree = worktree
     }
 
     init(from decoder: Decoder) throws {
@@ -35,6 +38,7 @@ struct AppConfig: Codable, Equatable, Sendable {
         storage       = (try? c.decode(StorageConfig.self, forKey: .storage))       ?? .init()
         git           = (try? c.decode(GitConfig.self, forKey: .git))           ?? .init()
         ui            = (try? c.decode(UIConfig.self, forKey: .ui))            ?? .init()
+        worktree      = (try? c.decode(WorktreeConfig.self, forKey: .worktree))      ?? .init()
     }
 
     static let defaults = AppConfig()
@@ -260,6 +264,33 @@ struct GitConfig: Codable, Equatable, Sendable {
         let d = GitConfig()
         let c = try decoder.container(keyedBy: CodingKeys.self)
         executablePath = (try? c.decode(String.self, forKey: .executablePath)) ?? d.executablePath
+    }
+}
+
+// MARK: - Worktree
+
+struct WorktreeConfig: Codable, Equatable, Sendable {
+    var basePath: String
+    var defaultBaseBranch: String
+
+    init(
+        basePath: String = "",
+        defaultBaseBranch: String = "main"
+    ) {
+        self.basePath = basePath
+        self.defaultBaseBranch = defaultBaseBranch
+    }
+
+    init(from decoder: Decoder) throws {
+        let d = WorktreeConfig()
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        basePath           = (try? c.decode(String.self, forKey: .basePath))           ?? d.basePath
+        defaultBaseBranch  = (try? c.decode(String.self, forKey: .defaultBaseBranch))  ?? d.defaultBaseBranch
+    }
+
+    /// Expands a leading `~` to the user's home directory.
+    var resolvedBasePath: String {
+        (basePath as NSString).expandingTildeInPath
     }
 }
 

@@ -108,6 +108,12 @@ final class AppDatabase: ObservableObject {
                 t.primaryKey(["commandId", "projectId"])
             }
         }
+        migrator.registerMigration("v8") { db in
+            try db.alter(table: "tasks") { t in
+                t.add(column: "worktreePath", .text)
+                t.add(column: "worktreeBranch", .text)
+            }
+        }
         try migrator.migrate(db)
     }
 
