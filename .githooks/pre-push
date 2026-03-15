@@ -6,6 +6,11 @@
 set -eu
 
 while read local_ref local_sha remote_ref remote_sha; do
+    # Skip notes refs — they are not regular commits and don't need notes themselves
+    case "$remote_ref" in
+        refs/notes/*) continue ;;
+    esac
+
     # Determine the range of commits being pushed
     if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
         # New branch — check all commits not yet on any remote branch
