@@ -1,0 +1,1 @@
+Fix pre-push hook blocking git notes-push by skipping refs/notes/* refs — notes objects are not regular commits and should not be checked for notes.
