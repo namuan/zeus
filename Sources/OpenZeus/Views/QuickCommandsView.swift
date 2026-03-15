@@ -36,7 +36,7 @@ struct QuickCommandsPopover: View {
                             ForEach(projectCommands) { cmd in
                                 CommandRow(
                                     command: cmd,
-                                    onRun: { onRun(cmd.command) },
+                                    onRun: { run(cmd) },
                                     onSave: { db.updateSavedCommand($0) },
                                     onDelete: { db.deleteSavedCommand(id: cmd.id) },
                                     scopeAction: .promote { db.promoteToGlobal(id: cmd.id) }
@@ -50,7 +50,7 @@ struct QuickCommandsPopover: View {
                             ForEach(globalCommands) { cmd in
                                 CommandRow(
                                     command: cmd,
-                                    onRun: { onRun(cmd.command) },
+                                    onRun: { run(cmd) },
                                     onSave: { db.updateSavedCommand($0) },
                                     onDelete: { db.deleteSavedCommand(id: cmd.id) },
                                     scopeAction: .demote { db.demoteToProject(id: cmd.id, projectID: projectID) }
@@ -88,6 +88,11 @@ struct QuickCommandsPopover: View {
         .onAppear {
             addFieldFocused = allCommands.isEmpty
         }
+    }
+
+    private func run(_ cmd: SavedCommand) {
+        db.recordCommandUsage(commandID: cmd.id, projectID: projectID)
+        onRun(cmd.command)
     }
 
     private func save() {

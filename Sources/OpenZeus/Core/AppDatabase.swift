@@ -8,6 +8,7 @@ final class AppDatabase: ObservableObject {
     @Published private(set) var projects: [Project] = []
     @Published private(set) var tasks: [AgentTask] = []
     @Published private(set) var savedCommands: [SavedCommand] = []
+    private var commandUsageCounts: [UUID: [UUID: Int]] = [:]
     @Published private(set) var projectApps: [ProjectApp] = []
 
     private var cancellables: [AnyDatabaseCancellable] = []
@@ -99,6 +100,14 @@ final class AppDatabase: ObservableObject {
                 t.column("displayName", .text).notNull()
             }
         }
+        migrator.registerMigration("v7") { db in
+            try db.create(table: "commandUsage") { t in
+                t.column("commandId", .text).notNull().references("savedCommands", onDelete: .cascade)
+                t.column("projectId", .text).notNull()
+                t.column("count", .integer).notNull().defaults(to: 0)
+                t.primaryKey(["commandId", "projectId"])
+            }
+        }
         try migrator.migrate(db)
     }
 
@@ -124,6 +133,22 @@ final class AppDatabase: ObservableObject {
                 .tracking { db in try SavedCommand.fetchAll(db) }
                 .start(in: dbQueue, scheduling: .immediate, onError: { _ in }, onChange: { [weak self] in
                     self?.savedCommands = $0
+                })
+        )
+        cancellables.append(
+            ValueObservation
+                .tracking { db -> [UUID: [UUID: Int]] in
+                    let rows = try Row.fetchAll(db, sql: "SELECT commandId, projectId, count FROM commandUsage")
+                    var dict: [UUID: [UUID: Int]] = [:]
+                    for row in rows {
+                        guard let cmdID = UUID(uuidString: row["commandId"] as String),
+                              let projID = UUID(uuidString: row["projectId"] as String) else { continue }
+                        dict[cmdID, default: [:]][projID] = row["count"]
+                    }
+                    return dict
+                }
+                .start(in: dbQueue, scheduling: .immediate, onError: { _ in }, onChange: { [weak self] in
+                    self?.commandUsageCounts = $0
                 })
         )
         cancellables.append(
@@ -190,7 +215,23 @@ final class AppDatabase: ObservableObject {
     // MARK: - Saved Commands
 
     func savedCommands(for projectID: UUID) -> [SavedCommand] {
-        savedCommands.filter { $0.projectID == projectID || $0.isGlobal }
+        let filtered = savedCommands.filter { $0.projectID == projectID || $0.isGlobal }
+        let counts = commandUsageCounts
+        return filtered.sorted { a, b in
+            (counts[a.id]?[projectID] ?? 0) > (counts[b.id]?[projectID] ?? 0)
+        }
+    }
+
+    func recordCommandUsage(commandID: UUID, projectID: UUID) {
+        try? dbQueue.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO commandUsage (commandId, projectId, count) VALUES (?, ?, 1)
+                    ON CONFLICT (commandId, projectId) DO UPDATE SET count = count + 1
+                    """,
+                arguments: [commandID.uuidString, projectID.uuidString]
+            )
+        }
     }
 
     func promoteToGlobal(id: UUID) {
