@@ -843,8 +843,8 @@ private func killTmuxSessionSync(_ tmux: String, sessionName: String) {
     let entry = TerminalEntry(taskID: taskID)
     entry.isRunning = true  // This starts polling which calls checkActiveProcess
 
-    // Wait for polling to complete
-    try? await Task.sleep(nanoseconds: 500_000_000)
+    // Wait for polling to complete (allow extra time under parallel test load)
+    try? await Task.sleep(nanoseconds: 1_500_000_000)
 
     // CRITICAL: Verify windows array was populated via parsing
     #expect(entry.windows.count == 3, "Expected 3 windows after parsing, got \(entry.windows.count)")

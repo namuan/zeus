@@ -7,7 +7,14 @@
       "Bash(swift:*)",
       "Bash(find:*)",
       "Bash(./scripts/check.sh 2>&1)",
-      "Bash(swiftlint:*)"
+      "Bash(swiftlint:*)",
+      "Bash(git notes:*)",
+      "Bash(git log:*)",
+      "Bash(git notes-push:*)",
+      "Bash(git fetch:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git stash:*)"
     ]
   }
 }

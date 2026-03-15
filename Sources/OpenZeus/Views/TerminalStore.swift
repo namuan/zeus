@@ -421,6 +421,7 @@ final class TerminalStore: ObservableObject {
     private var taskMetadata: [UUID: (name: String, watchMode: WatchMode)] = [:]
     private let notifier: ActivityNotifier
     nonisolated(unsafe) private var optionKeyMonitor: Any?
+    nonisolated(unsafe) private var shiftReturnMonitor: Any?
 
     init(config: TerminalConfig = .init(), notificationConfig: NotificationConfig = .init()) {
         self.config = config
@@ -429,6 +430,9 @@ final class TerminalStore: ObservableObject {
 
     deinit {
         if let monitor = optionKeyMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+        if let monitor = shiftReturnMonitor {
             NSEvent.removeMonitor(monitor)
         }
         periodicCleanupTask?.cancel()
@@ -442,6 +446,7 @@ final class TerminalStore: ObservableObject {
         }
         logInfo("TerminalStore: creating new TerminalEntry")
         installOptionKeyMonitor()
+        installShiftReturnMonitor()
         let entry = TerminalEntry(taskID: id, config: config)
         entries[id] = entry
         entry.$hasActiveProcess
@@ -492,6 +497,46 @@ final class TerminalStore: ObservableObject {
                 }
             }
             return event
+        }
+    }
+
+    // Intercept Shift+Return when a terminal view has focus and forward the kitty
+    // keyboard protocol sequence (ESC [ 1 3 ; 2 u) instead of plain \r, so apps
+    // like Claude Code can distinguish Shift+Enter (insert newline) from Enter (submit).
+    //
+    // Strategy: use `tmux send-keys -l` to inject the literal bytes directly into the
+    // active pane — this bypasses tmux's own key-binding / input-parsing layer and
+    // delivers the raw sequence to the running program (Claude Code) without needing
+    // any tmux extended-keys configuration.  Falls back to a direct PTY write when
+    // tmux is unavailable.
+    private func installShiftReturnMonitor() {
+        guard shiftReturnMonitor == nil else { return }
+        logInfo("Installing Shift+Return monitor for kitty keyboard protocol")
+        shiftReturnMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            let relevantFlags = event.modifierFlags.intersection([.shift, .option, .command, .control, .function])
+            guard relevantFlags == .shift, event.keyCode == 36 || event.keyCode == 76 else {
+                return event
+            }
+            Task { @MainActor [weak self] in
+                guard let self,
+                      let firstResponder = NSApplication.shared.keyWindow?.firstResponder
+                          as? LocalProcessTerminalView else { return }
+
+                if let entry = entries.values.first(where: { $0.terminalView === firstResponder }),
+                   !entry.tmuxUnavailable,
+                   let tmux = tmuxExecutable(searchPaths: config.tmuxSearchPaths) {
+                    // Inject ESC [ 1 3 ; 2 u (Shift+Enter, kitty keyboard protocol)
+                    // directly into the pane via `send-keys -l` (literal bytes).
+                    let sessionName = "\(config.tmuxSessionPrefix)\(entry.taskID.uuidString)"
+                    logDebug("Shift+Return: tmux send-keys -l to session \(sessionName)")
+                    await runProcessOutput(tmux, args: ["send-keys", "-t", sessionName, "-l", "\u{1b}[13;2u"])
+                } else {
+                    // No tmux — write directly to the PTY.
+                    logDebug("Shift+Return: direct PTY send of kitty ESC [ 1 3 ; 2 u")
+                    firstResponder.send([0x1b, 0x5b, 0x31, 0x33, 0x3b, 0x32, 0x75])
+                }
+            }
+            return nil // consume the event so SwiftTerm doesn't also send plain \r
         }
     }
 
