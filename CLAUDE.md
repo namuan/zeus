@@ -30,6 +30,9 @@ swift test
 # Install repo Git hooks
 ./scripts/install-hooks.sh
 
+# Setup Git notes sharing (once per clone)
+./scripts/setup-git-notes.sh
+
 # Build release + install to ~/Applications/OpenZeus.app
 ./install.command
 ```
@@ -109,7 +112,11 @@ swift test
 
 Tests live in `Tests/OpenZeusTests/OpenZeusTests.swift`. Use `@Test`, `#expect()`, and `#require()` for new tests. Add `@testable import OpenZeus` for internal access.
 
-Git pre-commit hooks live in `.githooks/`. Run `./scripts/install-hooks.sh` once per clone to make commits execute `./scripts/check.sh` before the commit is created.
+Git hooks live in `.githooks/`. Run `./scripts/install-hooks.sh` once per clone to install them:
+- **pre-commit:** Executes `./scripts/check.sh` (lint + tests) before each commit
+- **pre-push:** Rejects pushes containing commits without a Git note
+
+Setup Git notes sharing once per clone with `./scripts/setup-git-notes.sh`. Before pushing, add a note to each commit: `git notes add -m 'Your summary here'`
 
 Current tests cover model serialization (`AgentStatus`, `TerminalState`). New tests should cover model round-trips, GRDB persistence, and process lifecycle logic.
 
