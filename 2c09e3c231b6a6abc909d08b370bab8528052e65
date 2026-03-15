@@ -1,0 +1,1 @@
+Adds commandUsage table (migration v7) to track per-project run counts for quick commands. Commands are now sorted by usage frequency descending, with global commands tracking independently per project. Simplified implementation uses nested UUID dict to avoid string key allocation in sort comparator.
