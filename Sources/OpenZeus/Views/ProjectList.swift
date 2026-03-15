@@ -94,11 +94,17 @@ private struct ProjectRow: View {
         .overlay(alignment: .trailing) {
             if isHovered {
                 Button(action: onRemove) {
-                    Image(systemName: "trash")
-                        .foregroundStyle(.red)
+                    ZStack {
+                        Circle()
+                            .fill(.white)
+                            .frame(width: 22, height: 22)
+                        Image(systemName: "trash")
+                            .foregroundStyle(.red)
+                            .font(.system(size: 11))
+                    }
                 }
                 .buttonStyle(.borderless)
-                .help("Remove from App")
+                .help("Delete Project")
             }
         }
         .onHover { isHovered = $0 }

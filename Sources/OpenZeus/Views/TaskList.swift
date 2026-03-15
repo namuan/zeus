@@ -7,6 +7,7 @@ struct TaskList: View {
     @Binding var selection: AgentTask?
     @State private var showingNewTask = false
     @State private var showArchived = false
+    @State private var taskToDelete: AgentTask?
 
     private var projectTasks: [AgentTask] {
         let all = appDatabase.tasks(for: project.id)
@@ -25,7 +26,7 @@ struct TaskList: View {
                     isSelected: selection?.id == task.id,
                     onSelect: { selection = task },
                     onArchive: { archiveTask(task) },
-                    onDelete: { deleteTask(task) }
+                    onDelete: { taskToDelete = task }
                 )
             }
             .onDelete(perform: deleteTasks)
@@ -63,6 +64,17 @@ struct TaskList: View {
             }
         }
         .navigationTitle(project.name)
+        .confirmationDialog(
+            "Delete \"\(taskToDelete?.name ?? "Task")\"?",
+            isPresented: Binding(get: { taskToDelete != nil }, set: { if !$0 { taskToDelete = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let task = taskToDelete { deleteTask(task) }
+            }
+        } message: {
+            Text("This cannot be undone.")
+        }
         .sheet(isPresented: $showingNewTask) {
             NewTaskSheet(project: project)
         }
