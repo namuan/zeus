@@ -1,0 +1,1 @@
+Adds git notes sharing setup with pre-push enforcement to ensure commits have notes before pushing, plus a reminder in the check script
