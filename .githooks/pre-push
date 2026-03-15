@@ -1,0 +1,33 @@
+#!/bin/sh
+
+# Pre-push hook: reject pushes containing commits without a Git note.
+# Installed automatically via scripts/install-hooks.sh (core.hooksPath=.githooks).
+
+set -eu
+
+while read local_ref local_sha remote_ref remote_sha; do
+    # Determine the range of commits being pushed
+    if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+        # New branch — check all commits not yet on any remote branch
+        range="$local_sha"
+        commits=$(git rev-list --not --remotes "$range" 2>/dev/null || true)
+    else
+        commits=$(git rev-list "$remote_sha..$local_sha")
+    fi
+
+    for sha in $commits; do
+        note=$(git notes show "$sha" 2>/dev/null || true)
+        if [ -z "$note" ]; then
+            echo ""
+            echo "error: commit $sha has no Git note."
+            echo "Add one before pushing:"
+            echo ""
+            echo "  git notes add -m 'Your summary here' $sha"
+            echo "  git notes-push"
+            echo ""
+            exit 1
+        fi
+    done
+done
+
+exit 0

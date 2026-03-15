@@ -11,3 +11,8 @@ echo "Running SwiftLint..."
 
 echo "Running tests..."
 swift test
+
+echo ""
+echo "Reminder: add a Git note to your commit before pushing."
+echo "  git notes add -m 'Your summary here'"
+echo "  git notes-push"
