@@ -1,0 +1,1 @@
+Implement periodic cleanup of orphaned tmux sessions and enhance session termination when projects are removed.
