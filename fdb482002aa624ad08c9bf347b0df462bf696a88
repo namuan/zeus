@@ -1,0 +1,1 @@
+Simplify WorktreeService: make branchName static, parallelize branch-d and worktree-prune with async let, drop redundant worktreeConfigured guard in save(), collapse basePath+baseBranch into WorktreeConfig param, drop explicit = nil on optional properties
