@@ -12,11 +12,11 @@ final class AppDatabase: ObservableObject {
 
     private var cancellables: [AnyDatabaseCancellable] = []
 
-    convenience init() throws {
+    convenience init(storage: StorageConfig = StorageConfig()) throws {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let folder = appSupport.appendingPathComponent("OpenZeus", isDirectory: true)
+        let folder = appSupport.appendingPathComponent(storage.appSupportFolderName, isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        try self.init(path: folder.appendingPathComponent("app.db").path)
+        try self.init(path: folder.appendingPathComponent(storage.databaseFileName).path)
     }
 
     init(path: String) throws {

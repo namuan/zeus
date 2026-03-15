@@ -90,6 +90,7 @@ struct TaskList: View {
 struct NewTaskSheet: View {
     @EnvironmentObject var appDatabase: AppDatabase
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.appConfig) private var appConfig
     let project: Project
     var onCreated: (AgentTask) -> Void = { _ in }
 
@@ -129,7 +130,7 @@ struct NewTaskSheet: View {
             }
         }
         .padding(24)
-        .frame(minWidth: 400)
+        .frame(minWidth: CGFloat(appConfig.ui.taskSheetMinWidth))
     }
 
     private func save() {
@@ -140,7 +141,7 @@ struct NewTaskSheet: View {
             projectID: project.id,
             name: title.isEmpty ? trimmed : title,
             taskDescription: trimmed,
-            command: ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/bash",
+            command: appConfig.terminal.resolvedShell,
             environment: [:],
             workingDirectory: project.directoryURL,
             status: .idle
@@ -273,6 +274,7 @@ private struct TaskRow: View {
 private struct EditTaskSheet: View {
     @EnvironmentObject var appDatabase: AppDatabase
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.appConfig) private var appConfig
     let task: AgentTask
 
     @State private var description: String
@@ -306,7 +308,7 @@ private struct EditTaskSheet: View {
             }
         }
         .padding(24)
-        .frame(minWidth: 400)
+        .frame(minWidth: CGFloat(appConfig.ui.taskSheetMinWidth))
     }
 
     private func save() {

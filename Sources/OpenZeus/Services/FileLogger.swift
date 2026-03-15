@@ -1,14 +1,18 @@
 import Foundation
 
 /// File-based logger with rolling log files.
-/// Logs to ~/Library/Logs/OpenZeus/
+/// Set `FileLogger.config` before the singleton is first accessed to apply custom settings.
 final class FileLogger: @unchecked Sendable {
     static let shared = FileLogger()
 
+    /// Set this before the singleton is first accessed (e.g., in the app's init).
+    nonisolated(unsafe) static var config: LoggingConfig = LoggingConfig()
+
     private let logsDirectory: URL
     private let logFileURL: URL
-    private let maxFileSize: Int = 5 * 1024 * 1024  // 5MB per file
-    private let maxBackupFiles: Int = 5
+    private let maxFileSize: Int
+    private let maxBackupFiles: Int
+    private let formatter: DateFormatter
     private let queue = DispatchQueue(label: "com.openzeus.filelogger", qos: .utility)
     private var fileHandle: FileHandle?
 
@@ -20,9 +24,15 @@ final class FileLogger: @unchecked Sendable {
     }
 
     private init() {
+        let cfg = Self.config
         let home = FileManager.default.homeDirectoryForCurrentUser
-        logsDirectory = home.appendingPathComponent("Library/Logs/OpenZeus", isDirectory: true)
-        logFileURL = logsDirectory.appendingPathComponent("openzeus.log")
+        logsDirectory = home.appendingPathComponent(cfg.logsDirectory, isDirectory: true)
+        logFileURL = logsDirectory.appendingPathComponent(cfg.logFileName)
+        maxFileSize = cfg.maxFileSizeBytes
+        maxBackupFiles = cfg.maxBackupFiles
+        let f = DateFormatter()
+        f.dateFormat = cfg.timestampFormat
+        formatter = f
 
         createLogsDirectoryIfNeeded()
         openFileHandle()
@@ -41,7 +51,7 @@ final class FileLogger: @unchecked Sendable {
     }
 
     func log(_ message: String, level: Level = .info, file: String = #file, function: String = #function, line: Int = #line) {
-        let timestamp = Self.formatter.string(from: Date())
+        let timestamp = formatter.string(from: Date())
         let fileName = (file as NSString).lastPathComponent
         let logLine = "[\(timestamp)] [\(level.rawValue)] [\(fileName):\(line)] \(function) - \(message)\n"
 
@@ -80,7 +90,7 @@ final class FileLogger: @unchecked Sendable {
         fileHandle?.closeFile()
 
         // Delete oldest backup if we have too many
-        let oldestBackup = logFileURL.appendingPathExtension("5")
+        let oldestBackup = logFileURL.appendingPathExtension("\(maxBackupFiles)")
         try? FileManager.default.removeItem(at: oldestBackup)
 
         // Shift existing backups: .4 -> .5, .3 -> .4, etc.
@@ -98,12 +108,6 @@ final class FileLogger: @unchecked Sendable {
         FileManager.default.createFile(atPath: logFileURL.path, contents: nil)
         openFileHandle()
     }
-
-    private static let formatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
-        return f
-    }()
 
     // MARK: - Convenience Methods
 

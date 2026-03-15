@@ -3,6 +3,67 @@ import GRDB
 import Testing
 @testable import OpenZeus
 
+// MARK: - AppConfig tests
+
+@Test func appConfigDecodesFullJSON() throws {
+    let json = """
+    {
+        "terminal": { "pollIntervalSeconds": 5.0, "tmuxSessionPrefix": "test-" },
+        "logging": { "maxFileSizeBytes": 1048576 },
+        "notifications": { "soundName": "Glass" },
+        "storage": { "databaseFileName": "custom.db" },
+        "git": { "executablePath": "/usr/local/bin/git" },
+        "ui": { "projectListMinWidth": 250 }
+    }
+    """
+    let config = try JSONDecoder().decode(AppConfig.self, from: Data(json.utf8))
+    #expect(config.terminal.pollIntervalSeconds == 5.0)
+    #expect(config.terminal.tmuxSessionPrefix == "test-")
+    #expect(config.logging.maxFileSizeBytes == 1_048_576)
+    #expect(config.notifications.soundName == "Glass")
+    #expect(config.storage.databaseFileName == "custom.db")
+    #expect(config.git.executablePath == "/usr/local/bin/git")
+    #expect(config.ui.projectListMinWidth == 250)
+}
+
+@Test func appConfigUsesDefaultsForMissingKeys() throws {
+    let json = """
+    { "terminal": { "pollIntervalSeconds": 3.0 } }
+    """
+    let config = try JSONDecoder().decode(AppConfig.self, from: Data(json.utf8))
+    #expect(config.terminal.pollIntervalSeconds == 3.0)
+    // Missing keys within terminal section fall back to defaults
+    #expect(config.terminal.tmuxSettleDelayMs == 200)
+    #expect(config.terminal.tmuxSessionPrefix == "zeus-")
+    // Entirely missing sections fall back to defaults
+    #expect(config.logging.maxFileSizeBytes == 5_242_880)
+    #expect(config.notifications.soundName == "Tink")
+    #expect(config.storage.appSupportFolderName == "OpenZeus")
+    #expect(config.git.executablePath == "/usr/bin/git")
+    #expect(config.ui.projectListMinWidth == 200)
+}
+
+@Test func appConfigFallsBackToDefaultsOnInvalidJSON() {
+    let badData = Data("not valid json {{{".utf8)
+    let result = (try? JSONDecoder().decode(AppConfig.self, from: badData))
+    #expect(result == nil)  // decoder throws; load() would return .defaults
+    // Verify defaults are sensible
+    let defaults = AppConfig.defaults
+    #expect(defaults.terminal.pollIntervalSeconds == 2.0)
+    #expect(defaults.logging.logFileName == "openzeus.log")
+}
+
+@Test func appConfigDecodesEmptyObject() throws {
+    let config = try JSONDecoder().decode(AppConfig.self, from: Data("{}".utf8))
+    #expect(config.terminal.pollIntervalSeconds == 2.0)
+    #expect(config.terminal.tmuxSessionPrefix == "zeus-")
+    #expect(config.logging.logsDirectory == "Library/Logs/OpenZeus")
+    #expect(config.notifications.notificationTitle == "Agent finished")
+    #expect(config.storage.databaseFileName == "app.db")
+    #expect(config.git.executablePath == "/usr/bin/git")
+    #expect(config.ui.quickCommandsWidth == 440)
+}
+
 @Test func agentStatusCodable() throws {
     let statuses: [AgentStatus] = [.idle, .running, .stopped, .error]
     for status in statuses {

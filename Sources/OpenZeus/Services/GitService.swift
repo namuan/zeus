@@ -22,9 +22,11 @@ final class GitService: ObservableObject {
     @Published var lastError: String?
 
     private let workingDirectory: String
+    private let gitExecutablePath: String
 
-    init(workingDirectory: String) {
+    init(workingDirectory: String, gitExecutablePath: String = "/usr/bin/git") {
         self.workingDirectory = workingDirectory
+        self.gitExecutablePath = gitExecutablePath
     }
 
     // MARK: - Fetch Status
@@ -199,7 +201,7 @@ final class GitService: ObservableObject {
     private func runGit(args: [String]) async -> GitCommandResult {
         await withCheckedContinuation { continuation in
             let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            process.executableURL = URL(fileURLWithPath: self.gitExecutablePath)
             process.arguments = args
             process.currentDirectoryURL = URL(fileURLWithPath: workingDirectory)
 

@@ -4,7 +4,13 @@ import UserNotifications
 /// Sends sound and/or push notifications when a watched agent task finishes.
 @MainActor
 final class ActivityNotifier {
-    private let attentionSound = NSSound(named: "Tink")
+    private let config: NotificationConfig
+    private let attentionSound: NSSound?
+
+    init(config: NotificationConfig = .init()) {
+        self.config = config
+        self.attentionSound = NSSound(named: config.soundName)
+    }
 
     func requestPermission() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
@@ -24,8 +30,8 @@ final class ActivityNotifier {
         guard !NSApp.isActive else { return }
 
         let content = UNMutableNotificationContent()
-        content.title = "Agent finished"
-        content.body = "\(taskName) has completed its task"
+        content.title = config.notificationTitle
+        content.body = config.body(taskName: taskName)
         if watchMode == .on {
             content.sound = .default
         }

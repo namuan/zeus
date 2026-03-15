@@ -62,6 +62,7 @@ private struct TerminalPaneContent: View {
     let navigationTitle: String
     @ObservedObject var entry: TerminalEntry
     @State private var terminalVisible: Bool
+    @Environment(\.appConfig) private var appConfig
 
     init(sessionID: UUID, projectID: UUID, command: String, workingDirectory: String,
          navigationTitle: String, entry: TerminalEntry, autoStart: Bool = true) {
@@ -96,7 +97,7 @@ private struct TerminalPaneContent: View {
                     .background(.bar)
             }
             if terminalVisible {
-                TerminalRepresentable(sessionID: sessionID, command: command, workingDirectory: workingDirectory, entry: entry)
+                TerminalRepresentable(sessionID: sessionID, command: command, workingDirectory: workingDirectory, entry: entry, terminalConfig: appConfig.terminal)
             } else {
                 Color.clear
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -112,6 +113,7 @@ private struct WindowControlBar: View {
     let workingDirectory: String
     @Binding var terminalVisible: Bool
     @EnvironmentObject var db: AppDatabase
+    @Environment(\.appConfig) private var appConfig
     @State private var showCommands = false
 
     init(entry: TerminalEntry, projectID: UUID, workingDirectory: String, terminalVisible: Binding<Bool>) {
@@ -126,7 +128,7 @@ private struct WindowControlBar: View {
         HStack(spacing: 6) {
             terminalControls
             Divider().frame(height: 16)
-            GitControlsView(workingDirectory: workingDirectory)
+            GitControlsView(workingDirectory: workingDirectory, gitExecutablePath: appConfig.git.executablePath)
             Spacer()
         }
         .buttonStyle(.borderless)
@@ -267,8 +269,8 @@ private struct GitControlsView: View {
     @StateObject private var gitService: GitService
     @State private var showRevertConfirmation = false
 
-    init(workingDirectory: String) {
-        _gitService = StateObject(wrappedValue: GitService(workingDirectory: workingDirectory))
+    init(workingDirectory: String, gitExecutablePath: String = "/usr/bin/git") {
+        _gitService = StateObject(wrappedValue: GitService(workingDirectory: workingDirectory, gitExecutablePath: gitExecutablePath))
     }
 
     var body: some View {
@@ -456,6 +458,7 @@ private struct AppLauncherButton: View {
 
 private class TerminalContainerView: NSView {
     var sessionName: String?
+    var terminalConfig: TerminalConfig = .init()
     nonisolated(unsafe) private var scrollAccumulator: CGFloat = 0
     nonisolated(unsafe) private var scrollTimer: Timer?
     nonisolated(unsafe) private var didSelectionDrag = false
@@ -489,14 +492,14 @@ private class TerminalContainerView: NSView {
     override func mouseMoved(with event: NSEvent) { subviews.first?.mouseMoved(with: event) }
 
     override func scrollWheel(with event: NSEvent) {
-        guard let sessionName, let tmux = tmuxExecutable() else {
+        guard let sessionName, let tmux = tmuxExecutable(searchPaths: terminalConfig.tmuxSearchPaths) else {
             subviews.first?.scrollWheel(with: event) ?? super.scrollWheel(with: event)
             return
         }
 
         scrollAccumulator += event.scrollingDeltaY
         scrollTimer?.invalidate()
-        scrollTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: false) { [weak self] _ in
+        scrollTimer = Timer.scheduledTimer(withTimeInterval: terminalConfig.scrollTimerIntervalSeconds, repeats: false) { [weak self] _ in
             guard let self else { return }
             let delta = self.scrollAccumulator
             self.scrollAccumulator = 0
@@ -519,6 +522,7 @@ private struct TerminalRepresentable: NSViewRepresentable {
     let command: String
     let workingDirectory: String
     @ObservedObject var entry: TerminalEntry
+    let terminalConfig: TerminalConfig
 
     func makeNSView(context: Context) -> TerminalContainerView {
         logInfo("TerminalRepresentable.makeNSView: creating TerminalContainerView for session \(sessionID)")
@@ -526,6 +530,7 @@ private struct TerminalRepresentable: NSViewRepresentable {
     }
 
     func updateNSView(_ container: TerminalContainerView, context: Context) {
+        container.terminalConfig = terminalConfig
         let terminalView = entry.terminalView
         logDebug("TerminalRepresentable.updateNSView: session=\(sessionID), process running=\(terminalView.process?.running ?? false)")
 
@@ -546,9 +551,9 @@ private struct TerminalRepresentable: NSViewRepresentable {
         terminalView.allowMouseReporting = entry.mouseReportingEnabled
 
         if terminalView.process?.running == true {
-            if let sessionName = container.sessionName, let tmux = tmuxExecutable() {
+            if let sessionName = container.sessionName, let tmux = tmuxExecutable(searchPaths: terminalConfig.tmuxSearchPaths) {
                 Task {
-                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    try? await Task.sleep(for: .milliseconds(terminalConfig.mouseModeDelayMs))
                     logDebug("TerminalRepresentable.updateNSView: ensuring tmux mouse mode is enabled")
                     await runProcessOutput(tmux, args: ["set-option", "-t", sessionName, "mouse", "on"])
                 }
@@ -557,13 +562,11 @@ private struct TerminalRepresentable: NSViewRepresentable {
             return
         }
 
-        let shell = command.isEmpty
-            ? (ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/bash")
-            : command
+        let shell = command.isEmpty ? terminalConfig.resolvedShell : command
         logInfo("TerminalRepresentable.updateNSView: starting process, shell='\(shell)', cwd='\(workingDirectory)'")
 
-        if let tmux = tmuxExecutable() {
-            let sessionName = "zeus-\(sessionID.uuidString)"
+        if let tmux = tmuxExecutable(searchPaths: terminalConfig.tmuxSearchPaths) {
+            let sessionName = "\(terminalConfig.tmuxSessionPrefix)\(sessionID.uuidString)"
             container.sessionName = sessionName
             logInfo("TerminalRepresentable.updateNSView: starting tmux session '\(sessionName)'")
             terminalView.startProcess(
@@ -572,7 +575,7 @@ private struct TerminalRepresentable: NSViewRepresentable {
                 currentDirectory: workingDirectory
             )
             Task {
-                try? await Task.sleep(nanoseconds: 300_000_000)
+                try? await Task.sleep(for: .milliseconds(terminalConfig.mouseModeDelayMs))
                 logDebug("TerminalRepresentable.updateNSView: enabling tmux mouse mode")
                 await runProcessOutput(tmux, args: ["set-option", "-t", sessionName, "mouse", "on"])
             }

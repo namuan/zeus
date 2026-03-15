@@ -4,6 +4,7 @@ struct QuickCommandsPopover: View {
     let projectID: UUID
     let onRun: (String) -> Void
     @EnvironmentObject var db: AppDatabase
+    @Environment(\.appConfig) private var appConfig
     @State private var newCommand = ""
     @FocusState private var addFieldFocused: Bool
 
@@ -59,7 +60,7 @@ struct QuickCommandsPopover: View {
                         }
                     }
                 }
-                .frame(maxHeight: 520)
+                .frame(maxHeight: CGFloat(appConfig.ui.quickCommandsMaxHeight))
             }
 
             Divider()
@@ -82,8 +83,8 @@ struct QuickCommandsPopover: View {
             }
             .padding(10)
         }
-        .frame(width: 440)
-        .frame(minHeight: 420)
+        .frame(width: CGFloat(appConfig.ui.quickCommandsWidth))
+        .frame(minHeight: CGFloat(appConfig.ui.quickCommandsMinHeight))
         .onAppear {
             addFieldFocused = allCommands.isEmpty
         }

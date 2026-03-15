@@ -1,0 +1,116 @@
+{
+  "_comment": "Place this file at ~/Library/Application Support/OpenZeus/config.json. All keys are optional — any missing key uses the default shown here. Changes take effect on next app launch.",
+
+  "terminal": {
+    "_comment": "Process and terminal behaviour",
+
+    "pollIntervalSeconds": 2.0,
+    "// pollIntervalSeconds": "How often (in seconds) to poll each tmux session for an active process.",
+
+    "tmuxSettleDelayMs": 200,
+    "// tmuxSettleDelayMs": "Milliseconds to wait after tmux window/pane operations before refreshing state.",
+
+    "orphanCleanupIntervalSeconds": 300.0,
+    "// orphanCleanupIntervalSeconds": "How often (in seconds) to scan for and kill orphaned zeus-* tmux sessions.",
+
+    "sigtermGracePeriodMs": 300,
+    "// sigtermGracePeriodMs": "Milliseconds to wait after sending SIGTERM before the tmux session is killed.",
+
+    "scrollTimerIntervalSeconds": 0.05,
+    "// scrollTimerIntervalSeconds": "Debounce interval (seconds) for batching scroll-wheel events into tmux copy-mode commands.",
+
+    "mouseModeDelayMs": 300,
+    "// mouseModeDelayMs": "Milliseconds to wait before enabling tmux mouse mode after the session starts.",
+
+    "defaultShell": "",
+    "// defaultShell": "Shell used for new tasks. Empty string means use $SHELL, falling back to /bin/bash.",
+
+    "fontFamily": "monospacedSystemFont",
+    "// fontFamily": "Terminal font family name. Use \"monospacedSystemFont\" for the system default, or any PostScript font name (e.g. \"JetBrainsMono-Regular\").",
+
+    "fontSize": 13,
+    "// fontSize": "Terminal font size in points.",
+
+    "fontWeight": "regular",
+    "// fontWeight": "Terminal font weight. One of: ultralight, thin, light, regular, medium, semibold, bold, heavy, black.",
+
+    "tmuxSearchPaths": ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"],
+    "// tmuxSearchPaths": "Ordered list of paths to search for the tmux executable.",
+
+    "pkillPath": "/usr/bin/pkill",
+    "// pkillPath": "Absolute path to pkill, used to send SIGTERM to pane child processes.",
+
+    "tmuxSessionPrefix": "zeus-",
+    "// tmuxSessionPrefix": "Prefix for tmux session names (e.g. \"zeus-<task-uuid>\"). Change only if you have conflicts.",
+
+    "knownShells": ["zsh", "bash", "sh", "fish", "dash", "csh", "tcsh", "login", "tmux", "tmux: server"],
+    "// knownShells": "Process names considered 'idle' (not an active agent). Extend this list if you use an unusual shell."
+  },
+
+  "logging": {
+    "_comment": "File logger settings",
+
+    "logsDirectory": "Library/Logs/OpenZeus",
+    "// logsDirectory": "Path relative to $HOME where log files are stored.",
+
+    "logFileName": "openzeus.log",
+    "// logFileName": "Name of the active log file.",
+
+    "maxFileSizeBytes": 5242880,
+    "// maxFileSizeBytes": "Log file is rotated when it exceeds this size (default: 5 MB).",
+
+    "maxBackupFiles": 5,
+    "// maxBackupFiles": "Number of rotated log backups to keep (openzeus.log.1 … openzeus.log.N).",
+
+    "timestampFormat": "yyyy-MM-dd HH:mm:ss.SSS",
+    "// timestampFormat": "DateFormatter format string for log entry timestamps."
+  },
+
+  "notifications": {
+    "_comment": "Watch-mode alert content",
+
+    "soundName": "Tink",
+    "// soundName": "NSSound name played when a watched task finishes (watch mode 'on'). Any macOS system sound name works.",
+
+    "notificationTitle": "Agent finished",
+    "// notificationTitle": "Title of the macOS push notification sent when the app is in the background.",
+
+    "notificationBodyTemplate": "{taskName} has completed its task",
+    "// notificationBodyTemplate": "Body template for the push notification. {taskName} is replaced with the task's name."
+  },
+
+  "storage": {
+    "_comment": "Database and application-support paths",
+
+    "appSupportFolderName": "OpenZeus",
+    "// appSupportFolderName": "Folder name inside ~/Library/Application Support/ where the database is stored.",
+
+    "databaseFileName": "app.db",
+    "// databaseFileName": "SQLite database file name inside the application-support folder."
+  },
+
+  "git": {
+    "_comment": "Git integration",
+
+    "executablePath": "/usr/bin/git",
+    "// executablePath": "Absolute path to the git executable used for git status/commit/push operations."
+  },
+
+  "ui": {
+    "_comment": "Interface dimensions",
+
+    "projectListMinWidth": 200,
+    "projectListIdealWidth": 220,
+    "// projectList*": "Min/ideal width (points) of the project sidebar column.",
+
+    "taskSheetMinWidth": 400,
+    "// taskSheetMinWidth": "Minimum width (points) of the New Task and Edit Task sheets.",
+
+    "quickCommandsWidth": 440,
+    "// quickCommandsWidth": "Fixed width (points) of the Quick Commands popover.",
+
+    "quickCommandsMinHeight": 420,
+    "quickCommandsMaxHeight": 520,
+    "// quickCommands*Height": "Min/max height (points) of the Quick Commands popover scroll area."
+  }
+}

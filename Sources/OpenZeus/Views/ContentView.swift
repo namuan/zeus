@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject var appDatabase: AppDatabase
     @EnvironmentObject var terminalStore: TerminalStore
+    @Environment(\.appConfig) private var appConfig
     @State private var selectedProject: Project?
     @State private var selectedTask: AgentTask?
     @AppStorage("lastSelectedProjectID") private var lastSelectedProjectID = ""
@@ -11,7 +12,7 @@ struct ContentView: View {
         splitView
             .task {
                 restoreSelection()
-                terminalStore.startPeriodicCleanup {
+                terminalStore.startPeriodicCleanup(interval: appConfig.terminal.orphanCleanupIntervalSeconds) {
                     Set(appDatabase.tasks.filter { !$0.isArchived }.map { $0.id })
                 }
             }
@@ -36,7 +37,10 @@ struct ContentView: View {
     private var splitView: some View {
         NavigationSplitView(columnVisibility: .constant(.all)) {
             ProjectList(selection: $selectedProject, activeTask: selectedTask)
-                .navigationSplitViewColumnWidth(min: 200, ideal: 220)
+                .navigationSplitViewColumnWidth(
+                    min: CGFloat(appConfig.ui.projectListMinWidth),
+                    ideal: CGFloat(appConfig.ui.projectListIdealWidth)
+                )
         } content: {
             if let project = selectedProject {
                 TaskList(project: project, selection: $selectedTask)
