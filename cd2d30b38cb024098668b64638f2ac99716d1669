@@ -1,0 +1,1 @@
+Introduce AppConfig as central configuration struct and migrate UI components to use dynamic settings loaded from it.
