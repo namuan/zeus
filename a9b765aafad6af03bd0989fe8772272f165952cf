@@ -1,0 +1,1 @@
+Add WorktreeService with git worktree create/remove support; extract shared runGitCommand helper from GitService; add WorktreeConfig settings tab and task badge
