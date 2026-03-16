@@ -47,7 +47,9 @@ struct AppConfig: Codable, Equatable, Sendable {
         let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
         ).first!
-        return appSupport.appendingPathComponent("OpenZeus/config.json")
+        return appSupport
+            .appendingPathComponent(StorageConfig().appSupportFolderName, isDirectory: true)
+            .appendingPathComponent("config.json")
     }
 
     func save() {
@@ -235,8 +237,10 @@ struct StorageConfig: Codable, Equatable, Sendable {
     var appSupportFolderName: String
     var databaseFileName: String
 
+    static let appDirEnvKey = "ZEUS_APP_DIR"
+
     init(
-        appSupportFolderName: String = "OpenZeus",
+        appSupportFolderName: String = ProcessInfo.processInfo.environment[appDirEnvKey] ?? "OpenZeus",
         databaseFileName: String = "app.db"
     ) {
         self.appSupportFolderName = appSupportFolderName
