@@ -1,0 +1,1 @@
+Adds run-branch.sh to build and launch an isolated OpenZeus instance per git branch. Refactors StorageConfig to own the ZEUS_APP_DIR env-var key and use it as the default for appSupportFolderName, making it the single source of truth for both config and database path resolution.
