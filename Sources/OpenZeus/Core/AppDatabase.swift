@@ -75,23 +75,6 @@ final class AppDatabase: ObservableObject {
                 t.column("command", .text).notNull()
             }
         }
-        migrator.registerMigration("v5") { db in
-            let savedCommandColumns = try db.columns(in: "savedCommands").map(\.name)
-            guard savedCommandColumns.contains("name") else { return }
-
-            try db.create(table: "savedCommands_v2") { t in
-                t.primaryKey("id", .text)
-                t.column("projectId", .text).references("projects", onDelete: .cascade)
-                t.column("command", .text).notNull()
-            }
-            try db.execute(sql: """
-                INSERT INTO savedCommands_v2 (id, projectId, command)
-                SELECT id, projectId, command
-                FROM savedCommands
-                """)
-            try db.drop(table: "savedCommands")
-            try db.rename(table: "savedCommands_v2", to: "savedCommands")
-        }
         migrator.registerMigration("v6") { db in
             try db.create(table: "projectApps") { t in
                 t.primaryKey("id", .text)
@@ -115,6 +98,14 @@ final class AppDatabase: ObservableObject {
             }
         }
         try migrator.migrate(db)
+        // Remove stale records left by abandoned-branch migrations (v5, v9, v10).
+        // These were never part of the canonical schema; deleting them keeps
+        // grdb_migrations accurate without adding a new migration.
+        try db.write { db in
+            try db.execute(
+                sql: "DELETE FROM grdb_migrations WHERE identifier IN ('v5', 'v9', 'v10')"
+            )
+        }
     }
 
     // MARK: - Observation

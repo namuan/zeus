@@ -115,6 +115,74 @@ import Testing
     #expect(fetched.isEmpty)
 }
 
+@Test @MainActor func staleMigrationRecordsAreRemovedOnOpen() throws {
+    let fileManager = FileManager.default
+    let folder = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? fileManager.removeItem(at: folder) }
+
+    let path = folder.appendingPathComponent("app.db").path
+    let queue = try DatabaseQueue(path: path)
+
+    // Simulate a DB that went through all v1–v10 migrations (the abandoned-branch path).
+    try queue.write { db in
+        try db.create(table: "grdb_migrations") { t in
+            t.primaryKey("identifier", .text)
+        }
+        for version in ["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10"] {
+            try db.execute(sql: "INSERT INTO grdb_migrations(identifier) VALUES (?)", arguments: [version])
+        }
+        try db.create(table: "projects") { t in
+            t.primaryKey("id", .text)
+            t.column("name", .text).notNull()
+            t.column("directoryURL", .text).notNull()
+        }
+        try db.create(table: "tasks") { t in
+            t.primaryKey("id", .text)
+            t.column("projectId", .text)
+            t.column("name", .text).notNull()
+            t.column("taskDescription", .text)
+            t.column("command", .text).notNull()
+            t.column("environment", .text).notNull().defaults(to: "{}")
+            t.column("workingDirectory", .text).notNull()
+            t.column("status", .text).notNull().defaults(to: "idle")
+            t.column("terminalState", .text)
+            t.column("watchMode", .text).notNull().defaults(to: "off")
+            t.column("isArchived", .integer).notNull().defaults(to: 0)
+            t.column("worktreePath", .text)
+            t.column("worktreeBranch", .text)
+        }
+        try db.create(table: "savedCommands") { t in
+            t.primaryKey("id", .text)
+            t.column("projectId", .text)
+            t.column("command", .text).notNull()
+        }
+        try db.create(table: "projectApps") { t in
+            t.primaryKey("id", .text)
+            t.column("projectId", .text)
+            t.column("appPath", .text).notNull()
+            t.column("displayName", .text).notNull()
+        }
+        try db.create(table: "commandUsage") { t in
+            t.column("commandId", .text).notNull()
+            t.column("projectId", .text).notNull()
+            t.column("count", .integer).notNull().defaults(to: 0)
+            t.primaryKey(["commandId", "projectId"])
+        }
+    }
+
+    _ = try AppDatabase(path: path)
+
+    let applied = try queue.read { db in
+        try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations ORDER BY identifier")
+    }
+    #expect(!applied.contains("v5"))
+    #expect(!applied.contains("v9"))
+    #expect(!applied.contains("v10"))
+    #expect(applied.contains("v1"))
+    #expect(applied.contains("v8"))
+}
+
 @Test @MainActor func savedCommandsPersistAcrossDatabaseRestart() throws {
     let fileManager = FileManager.default
     let folder = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -142,64 +210,4 @@ import Testing
     let fetched = reopened.savedCommands(for: reopenedProject.id)
     #expect(fetched.count == 1)
     #expect(fetched.first?.command == "swift run OpenZeus")
-}
-
-@Test @MainActor func legacySavedCommandsSchemaMigratesWithoutNameColumn() throws {
-    let fileManager = FileManager.default
-    let folder = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-    try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
-    defer { try? fileManager.removeItem(at: folder) }
-
-    let path = folder.appendingPathComponent("app.db").path
-    let queue = try DatabaseQueue(path: path)
-
-    try queue.write { db in
-        try db.create(table: "grdb_migrations") { t in
-            t.primaryKey("identifier", .text)
-        }
-        for version in ["v1", "v2", "v3", "v4"] {
-            try db.execute(sql: "INSERT INTO grdb_migrations(identifier) VALUES (?)", arguments: [version])
-        }
-        try db.create(table: "projects") { t in
-            t.primaryKey("id", .text)
-            t.column("name", .text).notNull()
-            t.column("directoryURL", .text).notNull()
-        }
-        try db.create(table: "tasks") { t in
-            t.primaryKey("id", .text)
-            t.column("projectId", .text)
-            t.column("name", .text).notNull()
-            t.column("command", .text).notNull()
-            t.column("environment", .text).notNull().defaults(to: "{}")
-            t.column("workingDirectory", .text).notNull().defaults(to: "/tmp")
-            t.column("status", .text).notNull().defaults(to: "idle")
-            t.column("watchMode", .text).notNull().defaults(to: "off")
-            t.column("isArchived", .integer).notNull().defaults(to: 0)
-        }
-        try db.create(table: "savedCommands") { t in
-            t.primaryKey("id", .text)
-            t.column("projectId", .text)
-            t.column("name", .text).notNull()
-            t.column("command", .text).notNull()
-        }
-
-        let projectID = UUID().uuidString
-        try db.execute(
-            sql: "INSERT INTO projects (id, name, directoryURL) VALUES (?, ?, ?)",
-            arguments: [projectID, "Legacy", "/tmp"]
-        )
-        try db.execute(
-            sql: "INSERT INTO savedCommands (id, projectId, name, command) VALUES (?, ?, ?, ?)",
-            arguments: [UUID().uuidString, projectID, "legacy", "echo legacy"]
-        )
-    }
-
-    let reopened = try AppDatabase(path: path)
-    let project = try #require(reopened.projects.first)
-    let fetched = reopened.savedCommands(for: project.id)
-    #expect(fetched.count == 1)
-    #expect(fetched.first?.command == "echo legacy")
-
-    let columns = try queue.read { db in try db.columns(in: "savedCommands").map(\.name) }
-    #expect(columns == ["id", "projectId", "command"])
 }
