@@ -14,7 +14,10 @@
       "Bash(git fetch:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git stash:*)"
+      "Bash(git stash:*)",
+      "Bash(git:*)",
+      "Bash(./run-branch.sh)",
+      "Bash(bash run-branch.sh 2>&1)"
     ]
   }
 }
