@@ -48,6 +48,7 @@ echo ""
 
 # --- Create isolated config (once) ---
 mkdir -p "$BRANCH_DIR"
+TMUX_PREFIX="zeus-${SANITIZED_BRANCH}-"
 if [ ! -f "$CONFIG_FILE" ]; then
   echo "Creating isolated config at: $CONFIG_FILE"
   cat > "$CONFIG_FILE" <<CONFIG_JSON
@@ -57,10 +58,25 @@ if [ ! -f "$CONFIG_FILE" ]; then
     "databaseFileName": "app.db"
   },
   "terminal": {
-    "tmuxSessionPrefix": "zeus-${SANITIZED_BRANCH}-"
+    "tmuxSessionPrefix": "${TMUX_PREFIX}"
   }
 }
 CONFIG_JSON
+elif ! python3 -c "
+import json, sys
+d = json.load(open('$CONFIG_FILE'))
+sys.exit(0 if d.get('terminal', {}).get('tmuxSessionPrefix') else 1)
+" 2>/dev/null; then
+  echo "Upgrading config: adding tmuxSessionPrefix=${TMUX_PREFIX}"
+  python3 - "$CONFIG_FILE" "$TMUX_PREFIX" <<'PYEOF'
+import json, sys
+path, prefix = sys.argv[1], sys.argv[2]
+with open(path) as f:
+    config = json.load(f)
+config.setdefault("terminal", {})["tmuxSessionPrefix"] = prefix
+with open(path, "w") as f:
+    json.dump(config, f, indent=2)
+PYEOF
 fi
 
 # --- Build ---
