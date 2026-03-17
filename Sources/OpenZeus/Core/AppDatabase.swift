@@ -97,6 +97,11 @@ final class AppDatabase: ObservableObject {
                 t.add(column: "worktreeBranch", .text)
             }
         }
+        migrator.registerMigration("v11") { db in
+            try db.alter(table: "projects") { t in
+                t.add(column: "isDeleted", .integer).notNull().defaults(to: 0)
+            }
+        }
         try migrator.migrate(db)
         // Remove stale records left by abandoned-branch migrations (v5, v9, v10).
         // These were never part of the canonical schema; deleting them keeps
@@ -113,14 +118,14 @@ final class AppDatabase: ObservableObject {
     private func startObserving() {
         cancellables.append(
             ValueObservation
-                .tracking { db in try Project.order(Column("name")).fetchAll(db) }
+                .tracking { db in try Project.filter(Column("isDeleted") == false).order(Column("name")).fetchAll(db) }
                 .start(in: dbQueue, scheduling: .immediate, onError: { _ in }, onChange: { [weak self] in
                     self?.projects = $0
                 })
         )
         cancellables.append(
             ValueObservation
-                .tracking { db in try AgentTask.fetchAll(db) }
+                .tracking { db in try AgentTask.filter(sql: "projectId IN (SELECT id FROM projects WHERE isDeleted = 0)").fetchAll(db) }
                 .start(in: dbQueue, scheduling: .immediate, onError: { _ in }, onChange: { [weak self] in
                     self?.tasks = $0
                 })
@@ -165,7 +170,7 @@ final class AppDatabase: ObservableObject {
 
     func deleteProject(id: UUID) {
         try? dbQueue.write { db in
-            try db.execute(sql: "DELETE FROM projects WHERE id = ?", arguments: [id.uuidString])
+            try db.execute(sql: "UPDATE projects SET isDeleted = 1 WHERE id = ?", arguments: [id.uuidString])
         }
     }
 

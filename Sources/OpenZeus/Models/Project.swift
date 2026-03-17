@@ -5,6 +5,7 @@ struct Project: Identifiable {
     var id: UUID
     var name: String
     var directoryURL: URL
+    var isDeleted: Bool = false
 }
 
 extension Project: Equatable {
@@ -20,6 +21,7 @@ extension Project: FetchableRecord {
         id = UUID(uuidString: row["id"]) ?? UUID()
         name = row["name"]
         directoryURL = URL(fileURLWithPath: row["directoryURL"] as String)
+        isDeleted = (row["isDeleted"] as? Int64 ?? 0) != 0
     }
 }
 
@@ -30,5 +32,6 @@ extension Project: PersistableRecord {
         container["id"] = id.uuidString
         container["name"] = name
         container["directoryURL"] = directoryURL.path(percentEncoded: false)
+        container["isDeleted"] = isDeleted ? 1 : 0
     }
 }
