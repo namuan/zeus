@@ -26,8 +26,7 @@ struct QuickCommandsPopover: View {
                 Text("No saved commands yet")
                     .font(.callout)
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, 20)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             } else {
                 ScrollView {
                     LazyVStack(spacing: 0) {
@@ -39,7 +38,8 @@ struct QuickCommandsPopover: View {
                                     onRun: { run(cmd) },
                                     onSave: { db.updateSavedCommand($0) },
                                     onDelete: { db.deleteSavedCommand(id: cmd.id) },
-                                    scopeAction: .promote { db.promoteToGlobal(id: cmd.id) }
+                                    onPromote: { db.promoteToGlobal(id: cmd.id) },
+                                    onDemote: { db.demoteToProject(id: cmd.id, projectID: projectID) }
                                 )
                                 Divider()
                             }
@@ -53,7 +53,8 @@ struct QuickCommandsPopover: View {
                                     onRun: { run(cmd) },
                                     onSave: { db.updateSavedCommand($0) },
                                     onDelete: { db.deleteSavedCommand(id: cmd.id) },
-                                    scopeAction: .demote { db.demoteToProject(id: cmd.id, projectID: projectID) }
+                                    onPromote: { db.promoteToGlobal(id: cmd.id) },
+                                    onDemote: { db.demoteToProject(id: cmd.id, projectID: projectID) }
                                 )
                                 Divider()
                             }
@@ -121,50 +122,45 @@ private struct SectionHeader: View {
     }
 }
 
-private enum ScopeAction {
-    case promote(() -> Void)
-    case demote(() -> Void)
-
-    var icon: String {
-        switch self {
-        case .promote: "globe"
-        case .demote: "folder"
-        }
-    }
-
-    var help: String {
-        switch self {
-        case .promote: "Make global (available in all projects)"
-        case .demote: "Move to this project only"
-        }
-    }
-
-    func callAsFunction() {
-        switch self {
-        case .promote(let action), .demote(let action): action()
-        }
-    }
-}
-
 private struct CommandRow: View {
     let command: SavedCommand
     let onRun: () -> Void
     let onSave: (SavedCommand) -> Void
     let onDelete: () -> Void
-    let scopeAction: ScopeAction
+    let onPromote: () -> Void
+    let onDemote: () -> Void
 
     @State private var isEditing = false
     @State private var isHovered = false
     @State private var draft: String
+    @State private var isScopeGlobal: Bool
     @FocusState private var editFieldFocused: Bool
 
-    init(command: SavedCommand, onRun: @escaping () -> Void, onSave: @escaping (SavedCommand) -> Void, onDelete: @escaping () -> Void, scopeAction: ScopeAction) {
+    private var scopeIcon: String { isScopeGlobal ? "folder" : "globe" }
+
+    private var scopeHelp: String {
+        isScopeGlobal ? "Move to this project only" : "Make global (available in all projects)"
+    }
+
+    private func scopeAction() {
+        if isScopeGlobal {
+            isScopeGlobal = false
+            onDemote()
+        } else {
+            isScopeGlobal = true
+            onPromote()
+        }
+    }
+
+    init(command: SavedCommand, onRun: @escaping () -> Void, onSave: @escaping (SavedCommand) -> Void, onDelete: @escaping () -> Void, onPromote: @escaping () -> Void, onDemote: @escaping () -> Void) {
         self.command = command
         self.onRun = onRun
         self.onSave = onSave
         self.onDelete = onDelete
-        self.scopeAction = scopeAction
+        self.onPromote = onPromote
+        self.onDemote = onDemote
         _draft = State(initialValue: command.command)
+        _isScopeGlobal = State(initialValue: command.projectID == nil)
     }
 
     private var trimmedDraft: String {
@@ -231,14 +227,14 @@ private struct CommandRow: View {
                 .help("Click to edit")
             }
 
-            Button(action: scopeAction.callAsFunction) {
-                Image(systemName: scopeAction.icon)
+            Button(action: scopeAction) {
+                Image(systemName: scopeIcon)
                     .font(.caption)
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
             .focusEffectDisabled()
-            .help(scopeAction.help)
+            .help(scopeHelp)
 
             Button(action: onRun) {
                 Image(systemName: "play.fill")
@@ -265,6 +261,9 @@ private struct CommandRow: View {
             if !isEditing {
                 draft = newValue
             }
+        }
+        .onChange(of: command.projectID) { _, newValue in
+            isScopeGlobal = newValue == nil
         }
         .onChange(of: isEditing) { _, newValue in
             editFieldFocused = newValue
