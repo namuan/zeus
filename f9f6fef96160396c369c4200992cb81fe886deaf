@@ -1,0 +1,1 @@
+Auto-upgrade existing branch configs that predate the tmuxSessionPrefix isolation fix, using python3 to safely merge without overwriting user customizations
