@@ -55,6 +55,9 @@ if [ ! -f "$CONFIG_FILE" ]; then
   "storage": {
     "appSupportFolderName": "${APP_DIR_NAME}",
     "databaseFileName": "app.db"
+  },
+  "terminal": {
+    "tmuxSessionPrefix": "zeus-${SANITIZED_BRANCH}-"
   }
 }
 CONFIG_JSON
