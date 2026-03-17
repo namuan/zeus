@@ -1,0 +1,1 @@
+Add branch-specific tmuxSessionPrefix to config.json in run-branch.sh to prevent cleanupOrphanedSessions from killing sessions owned by other running instances
