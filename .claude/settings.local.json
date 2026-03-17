@@ -17,7 +17,10 @@
       "Bash(git stash:*)",
       "Bash(git:*)",
       "Bash(./run-branch.sh)",
-      "Bash(bash run-branch.sh 2>&1)"
+      "Bash(bash run-branch.sh 2>&1)",
+      "Bash(xcode-select:*)",
+      "Bash(gh pr:*)",
+      "Bash(open:*)"
     ]
   }
 }
