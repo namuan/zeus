@@ -239,17 +239,11 @@ private struct TaskRow: View {
             HStack(alignment: .top) {
                 descriptionText
                 Spacer()
-                if task.isArchived {
-                    Image(systemName: "archivebox.fill")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 2)
-                } else if isSelected {
-                    Image(systemName: "terminal.fill")
-                        .font(.caption)
-                        .foregroundStyle(Color.accentColor)
-                        .padding(.top, 2)
-                }
+                Image(systemName: task.isArchived ? "archivebox.fill" : "terminal.fill")
+                    .font(.caption)
+                    .foregroundStyle(task.isArchived ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.accentColor))
+                    .opacity(task.isArchived || isSelected ? 1 : 0)
+                    .padding(.top, 2)
             }
 
             HStack {
