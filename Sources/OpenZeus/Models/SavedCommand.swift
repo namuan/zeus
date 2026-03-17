@@ -9,9 +9,7 @@ struct SavedCommand: Identifiable {
     var isGlobal: Bool { projectID == nil }
 }
 
-extension SavedCommand: Equatable {
-    static func == (lhs: SavedCommand, rhs: SavedCommand) -> Bool { lhs.id == rhs.id }
-}
+extension SavedCommand: Equatable {}
 
 extension SavedCommand: FetchableRecord {
     init(row: Row) throws {
