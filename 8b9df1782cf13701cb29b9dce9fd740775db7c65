@@ -1,0 +1,1 @@
+Implements soft-delete for projects: replaces cascade DELETE with isDeleted flag so tasks and data are preserved when a project is removed from the list. Aligns decoding with isArchived pattern and filters orphaned tasks from the tasks observation.
