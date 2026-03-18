@@ -13,7 +13,8 @@ struct ContentView: View {
             .task {
                 restoreSelection()
                 terminalStore.startPeriodicCleanup(interval: appConfig.terminal.orphanCleanupIntervalSeconds) {
-                    Set(appDatabase.tasks.filter { !$0.isArchived }.map { $0.id })
+                    Set(appDatabase.tasks.filter { !$0.isArchived }.map { $0.id }
+                        + appDatabase.projects.filter { !$0.isDeleted }.map { $0.id })
                 }
             }
             .onChange(of: selectedTask) { _, newTask in
