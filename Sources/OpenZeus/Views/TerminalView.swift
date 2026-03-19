@@ -117,14 +117,16 @@ private struct TerminalBarCommand: Identifiable, Codable, Equatable {
     let command: String
 }
 
+private enum TerminalBarCommandEditorTarget: Equatable {
+    case addButton
+    case command(UUID)
+}
+
 private struct TerminalBarCommandEditorState: Equatable {
+    var target: TerminalBarCommandEditorTarget
     var commandID: UUID?
     var name: String
     var command: String
-
-    var title: String {
-        commandID == nil ? "Add Command" : "Edit Command"
-    }
 }
 
 private struct WindowControlBar: View {
@@ -167,25 +169,6 @@ private struct WindowControlBar: View {
         .background(.bar)
         .overlay(alignment: .trailing) {
             windowTabs
-        }
-        .popover(
-            isPresented: Binding(
-                get: { terminalBarCommandEditor != nil },
-                set: { if !$0 { terminalBarCommandEditor = nil } }
-            )
-        ) {
-            if let editor = terminalBarCommandEditor {
-                TerminalBarCommandEditorPopover(
-                    title: editor.title,
-                    initialName: editor.name,
-                    initialCommand: editor.command
-                ) { name, command in
-                    saveTerminalBarCommand(name: name, command: command, editingID: editor.commandID)
-                    terminalBarCommandEditor = nil
-                } onCancel: {
-                    terminalBarCommandEditor = nil
-                }
-            }
         }
     }
 
@@ -293,13 +276,10 @@ private struct WindowControlBar: View {
                         .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
                 .help(savedCommand.command)
+                .popover(isPresented: editorBinding(for: .command(savedCommand.id))) { editorPopoverContent(commandID: savedCommand.id) }
                 .contextMenu {
                     Button("Edit") {
-                        terminalBarCommandEditor = TerminalBarCommandEditorState(
-                            commandID: savedCommand.id,
-                            name: savedCommand.name,
-                            command: savedCommand.command
-                        )
+                        beginEditing(savedCommand)
                     }
                     Button("Delete", role: .destructive) {
                         deleteTerminalBarCommand(savedCommand.id)
@@ -308,7 +288,7 @@ private struct WindowControlBar: View {
             }
 
             Button {
-                terminalBarCommandEditor = TerminalBarCommandEditorState(commandID: nil, name: "", command: "")
+                beginAdding()
             } label: {
                 Image(systemName: "plus")
                     .font(.caption)
@@ -318,7 +298,57 @@ private struct WindowControlBar: View {
                     .clipShape(RoundedRectangle(cornerRadius: 4))
             }
             .help("Add terminal bar command")
+            .popover(isPresented: editorBinding(for: .addButton)) { editorPopoverContent(commandID: nil) }
         }
+    }
+
+    @ViewBuilder
+    private func editorPopoverContent(commandID: UUID?) -> some View {
+        if let editor = activeEditor(for: commandID) {
+            TerminalBarCommandEditorPopover(
+                initialName: editor.name,
+                initialCommand: editor.command
+            ) { name, command in
+                saveTerminalBarCommand(name: name, command: command, editingID: editor.commandID)
+                terminalBarCommandEditor = nil
+            } onCancel: {
+                terminalBarCommandEditor = nil
+            }
+        }
+    }
+
+    private func activeEditor(for commandID: UUID?) -> TerminalBarCommandEditorState? {
+        guard let editor = terminalBarCommandEditor else { return nil }
+        return editor.commandID == commandID ? editor : nil
+    }
+
+    private func editorBinding(for target: TerminalBarCommandEditorTarget) -> Binding<Bool> {
+        Binding(
+            get: { terminalBarCommandEditor?.target == target },
+            set: { isPresented in
+                if !isPresented, terminalBarCommandEditor?.target == target {
+                    terminalBarCommandEditor = nil
+                }
+            }
+        )
+    }
+
+    private func beginAdding() {
+        terminalBarCommandEditor = TerminalBarCommandEditorState(
+            target: .addButton,
+            commandID: nil,
+            name: "",
+            command: ""
+        )
+    }
+
+    private func beginEditing(_ command: TerminalBarCommand) {
+        terminalBarCommandEditor = TerminalBarCommandEditorState(
+            target: .command(command.id),
+            commandID: command.id,
+            name: command.name,
+            command: command.command
+        )
     }
 
     private func saveTerminalBarCommand(name: String, command: String, editingID: UUID?) {
@@ -399,7 +429,6 @@ private struct WindowControlBar: View {
 }
 
 private struct TerminalBarCommandEditorPopover: View {
-    let title: String
     let initialName: String
     let initialCommand: String
     let onSave: (String, String) -> Void
@@ -425,26 +454,15 @@ private struct TerminalBarCommandEditorPopover: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            Text(title)
-                .font(.title2.bold())
+            TextField("Command name", text: $name)
+                .textFieldStyle(.roundedBorder)
+                .focused($focusedField, equals: .name)
 
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Command Name")
-                    .font(.headline)
-
-                TextField("Build", text: $name)
-                    .textFieldStyle(.roundedBorder)
-                    .focused($focusedField, equals: .name)
-
-                Text("Actual Command")
-                    .font(.headline)
-
-                TextField("swift build", text: $command)
-                    .textFieldStyle(.roundedBorder)
-                    .fontDesign(.monospaced)
-                    .focused($focusedField, equals: .command)
-                    .onSubmit(save)
-            }
+            TextField("Actual command", text: $command)
+                .textFieldStyle(.roundedBorder)
+                .fontDesign(.monospaced)
+                .focused($focusedField, equals: .command)
+                .onSubmit(save)
 
             HStack {
                 Button("Cancel") { onCancel() }
