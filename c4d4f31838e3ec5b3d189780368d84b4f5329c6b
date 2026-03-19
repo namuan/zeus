@@ -1,0 +1,1 @@
+Add .id(workingDirectory) to GitControlsView to force recreation when task switches, fixing stale git status display in top bar
