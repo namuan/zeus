@@ -286,8 +286,6 @@ private struct WindowControlBar: View {
             }
             .environmentObject(db)
         }
-
-        Divider().frame(height: 16)
     }
 
     private var terminalBarCommandControls: some View {
