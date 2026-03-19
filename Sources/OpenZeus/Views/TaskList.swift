@@ -175,6 +175,9 @@ struct NewTaskSheet: View {
         }
         .padding(24)
         .frame(minWidth: CGFloat(appConfig.ui.taskSheetMinWidth))
+        .onAppear {
+            createWorktree = worktreeConfigured && appConfig.worktree.createByDefault
+        }
     }
 
     private func save() {

@@ -276,13 +276,16 @@ struct GitConfig: Codable, Equatable, Sendable {
 struct WorktreeConfig: Codable, Equatable, Sendable {
     var basePath: String
     var defaultBaseBranch: String
+    var createByDefault: Bool
 
     init(
         basePath: String = "",
-        defaultBaseBranch: String = "main"
+        defaultBaseBranch: String = "main",
+        createByDefault: Bool = true
     ) {
         self.basePath = basePath
         self.defaultBaseBranch = defaultBaseBranch
+        self.createByDefault = createByDefault
     }
 
     init(from decoder: Decoder) throws {
@@ -290,6 +293,7 @@ struct WorktreeConfig: Codable, Equatable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         basePath           = (try? c.decode(String.self, forKey: .basePath))           ?? d.basePath
         defaultBaseBranch  = (try? c.decode(String.self, forKey: .defaultBaseBranch))  ?? d.defaultBaseBranch
+        createByDefault    = (try? c.decode(Bool.self, forKey: .createByDefault))      ?? d.createByDefault
     }
 
     /// Expands a leading `~` to the user's home directory.
