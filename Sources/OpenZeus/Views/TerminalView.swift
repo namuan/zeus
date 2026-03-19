@@ -111,18 +111,16 @@ private struct TerminalPaneContent: View {
     }
 }
 
+private struct TerminalBarCommand: Identifiable, Codable, Equatable {
+    let id: UUID
+    let name: String
+    let command: String
+}
+
 private struct WindowControlBar: View {
-    private struct SampleTerminalCommand: Identifiable {
-        let title: String
-        let systemImage: String
-        let command: String
-
-        var id: String { title }
-    }
-
-    private static let sampleTerminalCommands: [SampleTerminalCommand] = [
-        SampleTerminalCommand(title: "PWD", systemImage: "folder", command: "pwd"),
-        SampleTerminalCommand(title: "Echo", systemImage: "text.bubble", command: "echo 'Hello from OpenZeus top bar'")
+    private static let defaultTerminalBarCommands: [TerminalBarCommand] = [
+        TerminalBarCommand(id: UUID(), name: "PWD", command: "pwd"),
+        TerminalBarCommand(id: UUID(), name: "Echo", command: "echo 'Hello from OpenZeus top bar'")
     ]
 
     @ObservedObject var entry: TerminalEntry
@@ -132,6 +130,8 @@ private struct WindowControlBar: View {
     @EnvironmentObject var db: AppDatabase
     @Environment(\.appConfig) private var appConfig
     @State private var showCommands = false
+    @State private var showAddTerminalBarCommand = false
+    @State private var terminalBarCommands: [TerminalBarCommand]
 
     init(entry: TerminalEntry, projectID: UUID, workingDirectory: String, terminalVisible: Binding<Bool>) {
         logDebug("WindowControlBar.init: projectID=\(projectID), windows.count=\(entry.windows.count)")
@@ -139,6 +139,7 @@ private struct WindowControlBar: View {
         self.projectID = projectID
         self.workingDirectory = workingDirectory
         self._terminalVisible = terminalVisible
+        self._terminalBarCommands = State(initialValue: Self.loadTerminalBarCommands(for: projectID))
     }
 
     var body: some View {
@@ -147,7 +148,7 @@ private struct WindowControlBar: View {
             Divider().frame(height: 16)
             GitControlsView(workingDirectory: workingDirectory, gitExecutablePath: appConfig.git.executablePath)
             Divider().frame(height: 16)
-            sampleCommandControls
+            terminalBarCommandControls
             Spacer()
         }
         .buttonStyle(.borderless)
@@ -156,6 +157,11 @@ private struct WindowControlBar: View {
         .background(.bar)
         .overlay(alignment: .trailing) {
             windowTabs
+        }
+        .sheet(isPresented: $showAddTerminalBarCommand) {
+            AddTerminalBarCommandSheet { name, command in
+                addTerminalBarCommand(name: name, command: command)
+            }
         }
     }
 
@@ -248,20 +254,60 @@ private struct WindowControlBar: View {
         Divider().frame(height: 16)
     }
 
-    private var sampleCommandControls: some View {
+    private var terminalBarCommandControls: some View {
         HStack(spacing: 4) {
-            ForEach(Self.sampleTerminalCommands) { sample in
+            ForEach(terminalBarCommands) { savedCommand in
                 Button {
-                    logInfo("WindowControlBar: sample command '\(sample.command)' sent")
-                    entry.sendCommand(sample.command)
+                    logInfo("WindowControlBar: terminal bar command '\(savedCommand.command)' sent")
+                    entry.sendCommand(savedCommand.command)
                 } label: {
-                    Label(sample.title, systemImage: sample.systemImage)
-                        .labelStyle(.titleAndIcon)
+                    Text(savedCommand.name)
                         .font(.caption)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.primary.opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
-                .help(sample.command)
+                .help(savedCommand.command)
             }
+
+            Button {
+                showAddTerminalBarCommand = true
+            } label: {
+                Image(systemName: "plus")
+                    .font(.caption)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.primary.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+            }
+            .help("Add terminal bar command")
         }
+    }
+
+    private func addTerminalBarCommand(name: String, command: String) {
+        let updatedCommands = terminalBarCommands + [TerminalBarCommand(id: UUID(), name: name, command: command)]
+        terminalBarCommands = updatedCommands
+        Self.saveTerminalBarCommands(updatedCommands, for: projectID)
+    }
+
+    private static func terminalBarCommandsStorageKey(for projectID: UUID) -> String {
+        "terminalBarCommands.\(projectID.uuidString)"
+    }
+
+    private static func loadTerminalBarCommands(for projectID: UUID) -> [TerminalBarCommand] {
+        let key = terminalBarCommandsStorageKey(for: projectID)
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let commands = try? JSONDecoder().decode([TerminalBarCommand].self, from: data) else {
+            return defaultTerminalBarCommands
+        }
+        return commands
+    }
+
+    private static func saveTerminalBarCommands(_ commands: [TerminalBarCommand], for projectID: UUID) {
+        let key = terminalBarCommandsStorageKey(for: projectID)
+        guard let data = try? JSONEncoder().encode(commands) else { return }
+        UserDefaults.standard.set(data, forKey: key)
     }
 
     private var windowTabs: some View {
@@ -295,6 +341,76 @@ private struct WindowControlBar: View {
         }
         .fixedSize(horizontal: true, vertical: false)
         .padding(.trailing, 10)
+    }
+}
+
+private struct AddTerminalBarCommandSheet: View {
+    let onSave: (String, String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.appConfig) private var appConfig
+    @State private var name = ""
+    @State private var command = ""
+    @FocusState private var focusedField: Field?
+
+    private enum Field {
+        case name
+        case command
+    }
+
+    private var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedCommand: String {
+        command.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("Add Command")
+                .font(.title2.bold())
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Command Name")
+                    .font(.headline)
+
+                TextField("Build", text: $name)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($focusedField, equals: .name)
+
+                Text("Actual Command")
+                    .font(.headline)
+
+                TextField("swift build", text: $command)
+                    .textFieldStyle(.roundedBorder)
+                    .fontDesign(.monospaced)
+                    .focused($focusedField, equals: .command)
+                    .onSubmit(save)
+            }
+
+            HStack {
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+
+                Spacer()
+
+                Button("Save") { save() }
+                    .keyboardShortcut(.return, modifiers: .command)
+                    .disabled(trimmedName.isEmpty || trimmedCommand.isEmpty)
+            }
+        }
+        .padding(24)
+        .frame(minWidth: CGFloat(appConfig.ui.taskSheetMinWidth))
+        .onAppear {
+            focusedField = .name
+        }
+    }
+
+    private func save() {
+        guard !trimmedName.isEmpty, !trimmedCommand.isEmpty else { return }
+        onSave(trimmedName, trimmedCommand)
+        dismiss()
     }
 }
 
