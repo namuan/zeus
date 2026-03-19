@@ -1,0 +1,1 @@
+Archive now removes the git worktree and branch, same as delete. Fixes stale worktrees accumulating when tasks are archived.
