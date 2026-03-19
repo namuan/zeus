@@ -503,6 +503,7 @@ private struct GitControlsView: View {
 
     var body: some View {
         gitButtons
+            .animation(.easeInOut(duration: 0.2), value: gitService.stats)
             .onAppear {
                 logInfo("GitControlsView.onAppear: fetching git status")
                 Task { await gitService.fetchStatus() }
@@ -527,6 +528,7 @@ private struct GitControlsView: View {
             }
             .foregroundStyle(.secondary)
             .help("Current branch: \(stats.branch)")
+            .transition(.opacity)
 
             if stats.hasRemote {
                 if stats.behind > 0 {
@@ -534,12 +536,14 @@ private struct GitControlsView: View {
                         .font(.caption)
                         .foregroundStyle(.orange)
                         .help("\(stats.behind) commits behind remote")
+                        .transition(.opacity)
                 }
                 if stats.ahead > 0 {
                     Label("\(stats.ahead)", systemImage: "arrow.up")
                         .font(.caption)
                         .foregroundStyle(.blue)
                         .help("\(stats.ahead) commits ahead of remote")
+                        .transition(.opacity)
                 }
             }
 
@@ -549,6 +553,7 @@ private struct GitControlsView: View {
                     .fontWeight(.medium)
                     .foregroundStyle(.green)
                     .help("\(stats.staged) staged changes")
+                    .transition(.opacity)
             }
             if stats.unstaged > 0 {
                 Text("~\(stats.unstaged)")
@@ -556,6 +561,7 @@ private struct GitControlsView: View {
                     .fontWeight(.medium)
                     .foregroundStyle(.orange)
                     .help("\(stats.unstaged) unstaged changes")
+                    .transition(.opacity)
             }
             if stats.untracked > 0 {
                 Text("?\(stats.untracked)")
@@ -563,10 +569,12 @@ private struct GitControlsView: View {
                     .fontWeight(.medium)
                     .foregroundStyle(.secondary)
                     .help("\(stats.untracked) untracked files")
+                    .transition(.opacity)
             }
         } else if gitService.isLoading {
             ProgressView()
                 .controlSize(.small)
+                .transition(.opacity)
         }
 
         if gitService.stats?.hasChanges == true {
@@ -574,6 +582,7 @@ private struct GitControlsView: View {
                 Image(systemName: "arrow.uturn.backward")
             }
             .help("Revert All Changes")
+            .transition(.opacity)
             .confirmationDialog(
                 "Revert all changes?",
                 isPresented: $showRevertConfirmation,
