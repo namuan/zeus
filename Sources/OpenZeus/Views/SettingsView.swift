@@ -3,13 +3,10 @@ import SwiftUI
 
 struct SettingsView: View {
     @State private var config: AppConfig
-    @State private var savedConfig: AppConfig
     @State private var saveTask: Task<Void, Never>?
 
     init() {
-        let loaded = AppConfig.load()
-        _config = State(initialValue: loaded)
-        _savedConfig = State(initialValue: loaded)
+        _config = State(initialValue: AppConfig.load())
     }
 
     var body: some View {
@@ -37,20 +34,9 @@ struct SettingsView: View {
                     .tabItem { Label("Logging", systemImage: "doc.text") }
             }
             .frame(width: 500, height: 480)
-
-            if config != savedConfig {
-                Divider()
-                HStack(spacing: 6) {
-                    Image(systemName: "info.circle")
-                    Text("Changes will take effect after restarting OpenZeus.")
-                        .font(.caption)
-                }
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(.bar)
-            }
+        }
+        .onAppear {
+            config = AppConfig.load()
         }
         .onChange(of: config) { _, newConfig in
             saveTask?.cancel()
@@ -58,12 +44,13 @@ struct SettingsView: View {
                 try? await Task.sleep(for: .milliseconds(500))
                 guard !Task.isCancelled else { return }
                 newConfig.save()
-                savedConfig = newConfig
+                NotificationCenter.default.post(name: .appConfigChanged, object: nil)
             }
         }
         .onDisappear {
             saveTask?.cancel()
             config.save()
+            NotificationCenter.default.post(name: .appConfigChanged, object: nil)
         }
     }
 }

@@ -154,7 +154,11 @@ struct NewTaskSheet: View {
             Toggle(isOn: $createWorktree) {
                 HStack(spacing: 6) {
                     Text("Create Git worktree")
-                    if !worktreeConfigured {
+                    if worktreeConfigured {
+                        Text(appConfig.worktree.resolvedBasePath)
+                            .foregroundStyle(.secondary)
+                            .font(.caption)
+                    } else {
                         Text("(configure path in Settings > Worktree)")
                             .foregroundStyle(.secondary)
                             .font(.caption)

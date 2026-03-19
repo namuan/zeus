@@ -3,13 +3,13 @@ import UserNotifications
 
 @main
 struct OpenZeusApp: App {
-    let appConfig: AppConfig
+    @State private var appConfig: AppConfig
     @StateObject private var terminalStore: TerminalStore
     @StateObject private var appDatabase: AppDatabase
 
     init() {
         let config = AppConfig.load()
-        appConfig = config
+        _appConfig = State(initialValue: config)
         FileLogger.config = config.logging
         _terminalStore = StateObject(wrappedValue: TerminalStore(
             config: config.terminal,
@@ -30,6 +30,9 @@ struct OpenZeusApp: App {
                     DispatchQueue.main.async {
                         NSApp.windows.first?.zoom(nil)
                     }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .appConfigChanged)) { _ in
+                    appConfig = AppConfig.load()
                 }
         }
 
