@@ -236,6 +236,11 @@ private struct WorktreeTab: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Defaults") {
+                Toggle("Create worktree for new tasks", isOn: $config.createByDefault)
+                    .help("When enabled, the New Task dialog will have 'Create Git worktree' checked by default.")
+            }
+
             if config.basePath.isEmpty {
                 Section {
                     Label {
