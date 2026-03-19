@@ -115,6 +115,32 @@ private struct TerminalBarCommand: Identifiable, Codable, Equatable {
     let id: UUID
     let name: String
     let command: String
+    var colorName: String
+
+    static let colorNames = [
+        "none", "blue", "teal", "green", "orange", "red", "purple", "pink", "brown", "gray"
+    ]
+
+    private struct RGB { let r: CGFloat; let g: CGFloat; let b: CGFloat }
+
+    private static let colorMap: [String: RGB] = [
+        "blue": RGB(r: 0.65, g: 0.80, b: 0.94),
+        "teal": RGB(r: 0.60, g: 0.85, b: 0.82),
+        "green": RGB(r: 0.62, g: 0.85, b: 0.62),
+        "orange": RGB(r: 0.96, g: 0.80, b: 0.55),
+        "red": RGB(r: 0.94, g: 0.68, b: 0.68),
+        "purple": RGB(r: 0.80, g: 0.70, b: 0.92),
+        "pink": RGB(r: 0.92, g: 0.72, b: 0.82),
+        "brown": RGB(r: 0.82, g: 0.74, b: 0.62),
+        "gray": RGB(r: 0.80, g: 0.80, b: 0.80)
+    ]
+
+    static func displayColor(for colorName: String) -> SwiftUI.Color {
+        guard let c = colorMap[colorName] else { return SwiftUI.Color.primary.opacity(0.1) }
+        return SwiftUI.Color(nsColor: NSColor(calibratedRed: c.r, green: c.g, blue: c.b, alpha: 1))
+    }
+
+    var displayColor: SwiftUI.Color { Self.displayColor(for: colorName) }
 }
 
 private enum TerminalBarCommandEditorTarget: Equatable {
@@ -127,13 +153,11 @@ private struct TerminalBarCommandEditorState: Equatable {
     var commandID: UUID?
     var name: String
     var command: String
+    var colorName: String
 }
 
 private struct WindowControlBar: View {
-    private static let defaultTerminalBarCommands: [TerminalBarCommand] = [
-        TerminalBarCommand(id: UUID(), name: "PWD", command: "pwd"),
-        TerminalBarCommand(id: UUID(), name: "Echo", command: "echo 'Hello from OpenZeus top bar'")
-    ]
+    private static let defaultTerminalBarCommands: [TerminalBarCommand] = []
 
     @ObservedObject var entry: TerminalEntry
     let projectID: UUID
@@ -273,7 +297,7 @@ private struct WindowControlBar: View {
                         .font(.caption)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
-                        .background(Color.primary.opacity(0.1))
+                        .background(savedCommand.displayColor)
                         .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
                 .help(savedCommand.command)
@@ -308,9 +332,10 @@ private struct WindowControlBar: View {
         if let editor = activeEditor(for: commandID) {
             TerminalBarCommandEditorPopover(
                 initialName: editor.name,
-                initialCommand: editor.command
-            ) { name, command in
-                saveTerminalBarCommand(name: name, command: command, editingID: editor.commandID)
+                initialCommand: editor.command,
+                initialColorName: editor.colorName
+            ) { name, command, colorName in
+                saveTerminalBarCommand(name: name, command: command, colorName: colorName, editingID: editor.commandID)
                 terminalBarCommandEditor = nil
             } onCancel: {
                 terminalBarCommandEditor = nil
@@ -339,7 +364,8 @@ private struct WindowControlBar: View {
             target: .addButton,
             commandID: nil,
             name: "",
-            command: ""
+            command: "",
+            colorName: "none"
         )
     }
 
@@ -348,11 +374,12 @@ private struct WindowControlBar: View {
             target: .command(command.id),
             commandID: command.id,
             name: command.name,
-            command: command.command
+            command: command.command,
+            colorName: command.colorName
         )
     }
 
-    private func saveTerminalBarCommand(name: String, command: String, editingID: UUID?) {
+    private func saveTerminalBarCommand(name: String, command: String, colorName: String, editingID: UUID?) {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedCommand = command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty, !trimmedCommand.isEmpty else { return }
@@ -361,10 +388,10 @@ private struct WindowControlBar: View {
         if let editingID,
            let index = terminalBarCommands.firstIndex(where: { $0.id == editingID }) {
             var commands = terminalBarCommands
-            commands[index] = TerminalBarCommand(id: editingID, name: trimmedName, command: trimmedCommand)
+            commands[index] = TerminalBarCommand(id: editingID, name: trimmedName, command: trimmedCommand, colorName: colorName)
             updatedCommands = commands
         } else {
-            updatedCommands = terminalBarCommands + [TerminalBarCommand(id: UUID(), name: trimmedName, command: trimmedCommand)]
+            updatedCommands = terminalBarCommands + [TerminalBarCommand(id: UUID(), name: trimmedName, command: trimmedCommand, colorName: colorName)]
         }
         terminalBarCommands = updatedCommands
         Self.saveTerminalBarCommands(updatedCommands, for: projectID)
@@ -432,12 +459,14 @@ private struct WindowControlBar: View {
 private struct TerminalBarCommandEditorPopover: View {
     let initialName: String
     let initialCommand: String
-    let onSave: (String, String) -> Void
+    let initialColorName: String
+    let onSave: (String, String, String) -> Void
     let onCancel: () -> Void
 
     @Environment(\.appConfig) private var appConfig
     @State private var name = ""
     @State private var command = ""
+    @State private var selectedColorName = "none"
     @FocusState private var focusedField: Field?
 
     private enum Field {
@@ -465,6 +494,30 @@ private struct TerminalBarCommandEditorPopover: View {
                 .focused($focusedField, equals: .command)
                 .onSubmit(save)
 
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Color")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                LazyVGrid(columns: Array(repeating: GridItem(.fixed(28), spacing: 6), count: 5), spacing: 6) {
+                    ForEach(TerminalBarCommand.colorNames, id: \.self) { colorName in
+                        let color = TerminalBarCommand.displayColor(for: colorName)
+                        Button {
+                            selectedColorName = colorName
+                        } label: {
+                            Circle()
+                                .fill(colorName == "none" ? Color.primary.opacity(0.1) : color)
+                                .frame(width: 22, height: 22)
+                                .overlay {
+                                    Circle()
+                                        .strokeBorder(.primary.opacity(selectedColorName == colorName ? 0.6 : 0), lineWidth: 2)
+                                }
+                        }
+                        .buttonStyle(.plain)
+                        .help(colorName.capitalized)
+                    }
+                }
+            }
+
             HStack {
                 Button("Cancel") { onCancel() }
                     .keyboardShortcut(.cancelAction)
@@ -481,13 +534,14 @@ private struct TerminalBarCommandEditorPopover: View {
         .onAppear {
             name = initialName
             command = initialCommand
+            selectedColorName = initialColorName
             focusedField = .name
         }
     }
 
     private func save() {
         guard !trimmedName.isEmpty, !trimmedCommand.isEmpty else { return }
-        onSave(trimmedName, trimmedCommand)
+        onSave(trimmedName, trimmedCommand, selectedColorName)
     }
 }
 
