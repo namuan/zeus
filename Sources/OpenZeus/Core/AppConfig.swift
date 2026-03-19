@@ -92,6 +92,10 @@ extension EnvironmentValues {
     }
 }
 
+extension Notification.Name {
+    static let appConfigChanged = Notification.Name("AppConfigChanged")
+}
+
 // MARK: - Terminal
 
 struct TerminalConfig: Codable, Equatable, Sendable {
