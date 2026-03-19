@@ -182,9 +182,6 @@ private struct WindowControlBar: View {
         HStack(spacing: 6) {
             terminalControls
             Divider().frame(height: 16)
-            GitControlsView(workingDirectory: workingDirectory, gitExecutablePath: appConfig.git.executablePath)
-                .id(workingDirectory)
-            Divider().frame(height: 16)
             terminalBarCommandControls
             Spacer()
         }
@@ -193,7 +190,14 @@ private struct WindowControlBar: View {
         .padding(.vertical, 2)
         .background(.bar)
         .overlay(alignment: .trailing) {
-            windowTabs
+            HStack(spacing: 6) {
+                GitControlsView(workingDirectory: workingDirectory, gitExecutablePath: appConfig.git.executablePath)
+                    .id(workingDirectory)
+                Divider().frame(height: 16)
+                windowTabs
+            }
+            .buttonStyle(.borderless)
+            .padding(.trailing, 10)
         }
     }
 
@@ -452,7 +456,6 @@ private struct WindowControlBar: View {
             .padding(.vertical, 4)
         }
         .fixedSize(horizontal: true, vertical: false)
-        .padding(.trailing, 10)
     }
 }
 
