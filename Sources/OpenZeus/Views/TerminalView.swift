@@ -111,7 +111,30 @@ private struct TerminalPaneContent: View {
     }
 }
 
+private struct TerminalBarCommand: Identifiable, Codable, Equatable {
+    let id: UUID
+    let name: String
+    let command: String
+}
+
+private enum TerminalBarCommandEditorTarget: Equatable {
+    case addButton
+    case command(UUID)
+}
+
+private struct TerminalBarCommandEditorState: Equatable {
+    var target: TerminalBarCommandEditorTarget
+    var commandID: UUID?
+    var name: String
+    var command: String
+}
+
 private struct WindowControlBar: View {
+    private static let defaultTerminalBarCommands: [TerminalBarCommand] = [
+        TerminalBarCommand(id: UUID(), name: "PWD", command: "pwd"),
+        TerminalBarCommand(id: UUID(), name: "Echo", command: "echo 'Hello from OpenZeus top bar'")
+    ]
+
     @ObservedObject var entry: TerminalEntry
     let projectID: UUID
     let workingDirectory: String
@@ -119,6 +142,8 @@ private struct WindowControlBar: View {
     @EnvironmentObject var db: AppDatabase
     @Environment(\.appConfig) private var appConfig
     @State private var showCommands = false
+    @State private var terminalBarCommandEditor: TerminalBarCommandEditorState?
+    @State private var terminalBarCommands: [TerminalBarCommand]
 
     init(entry: TerminalEntry, projectID: UUID, workingDirectory: String, terminalVisible: Binding<Bool>) {
         logDebug("WindowControlBar.init: projectID=\(projectID), windows.count=\(entry.windows.count)")
@@ -126,6 +151,7 @@ private struct WindowControlBar: View {
         self.projectID = projectID
         self.workingDirectory = workingDirectory
         self._terminalVisible = terminalVisible
+        self._terminalBarCommands = State(initialValue: Self.loadTerminalBarCommands(for: projectID))
     }
 
     var body: some View {
@@ -133,6 +159,8 @@ private struct WindowControlBar: View {
             terminalControls
             Divider().frame(height: 16)
             GitControlsView(workingDirectory: workingDirectory, gitExecutablePath: appConfig.git.executablePath)
+            Divider().frame(height: 16)
+            terminalBarCommandControls
             Spacer()
         }
         .buttonStyle(.borderless)
@@ -233,6 +261,139 @@ private struct WindowControlBar: View {
         Divider().frame(height: 16)
     }
 
+    private var terminalBarCommandControls: some View {
+        HStack(spacing: 4) {
+            ForEach(terminalBarCommands) { savedCommand in
+                Button {
+                    logInfo("WindowControlBar: terminal bar command '\(savedCommand.command)' sent")
+                    entry.sendCommand(savedCommand.command)
+                } label: {
+                    Text(savedCommand.name)
+                        .font(.caption)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.primary.opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .help(savedCommand.command)
+                .popover(isPresented: editorBinding(for: .command(savedCommand.id))) { editorPopoverContent(commandID: savedCommand.id) }
+                .contextMenu {
+                    Button("Edit") {
+                        beginEditing(savedCommand)
+                    }
+                    Button("Delete", role: .destructive) {
+                        deleteTerminalBarCommand(savedCommand.id)
+                    }
+                }
+            }
+
+            Button {
+                beginAdding()
+            } label: {
+                Image(systemName: "plus")
+                    .font(.caption)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.primary.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+            }
+            .help("Add terminal bar command")
+            .popover(isPresented: editorBinding(for: .addButton)) { editorPopoverContent(commandID: nil) }
+        }
+    }
+
+    @ViewBuilder
+    private func editorPopoverContent(commandID: UUID?) -> some View {
+        if let editor = activeEditor(for: commandID) {
+            TerminalBarCommandEditorPopover(
+                initialName: editor.name,
+                initialCommand: editor.command
+            ) { name, command in
+                saveTerminalBarCommand(name: name, command: command, editingID: editor.commandID)
+                terminalBarCommandEditor = nil
+            } onCancel: {
+                terminalBarCommandEditor = nil
+            }
+        }
+    }
+
+    private func activeEditor(for commandID: UUID?) -> TerminalBarCommandEditorState? {
+        guard let editor = terminalBarCommandEditor else { return nil }
+        return editor.commandID == commandID ? editor : nil
+    }
+
+    private func editorBinding(for target: TerminalBarCommandEditorTarget) -> Binding<Bool> {
+        Binding(
+            get: { terminalBarCommandEditor?.target == target },
+            set: { isPresented in
+                if !isPresented, terminalBarCommandEditor?.target == target {
+                    terminalBarCommandEditor = nil
+                }
+            }
+        )
+    }
+
+    private func beginAdding() {
+        terminalBarCommandEditor = TerminalBarCommandEditorState(
+            target: .addButton,
+            commandID: nil,
+            name: "",
+            command: ""
+        )
+    }
+
+    private func beginEditing(_ command: TerminalBarCommand) {
+        terminalBarCommandEditor = TerminalBarCommandEditorState(
+            target: .command(command.id),
+            commandID: command.id,
+            name: command.name,
+            command: command.command
+        )
+    }
+
+    private func saveTerminalBarCommand(name: String, command: String, editingID: UUID?) {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedCommand = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty, !trimmedCommand.isEmpty else { return }
+
+        let updatedCommands: [TerminalBarCommand]
+        if let editingID,
+           let index = terminalBarCommands.firstIndex(where: { $0.id == editingID }) {
+            var commands = terminalBarCommands
+            commands[index] = TerminalBarCommand(id: editingID, name: trimmedName, command: trimmedCommand)
+            updatedCommands = commands
+        } else {
+            updatedCommands = terminalBarCommands + [TerminalBarCommand(id: UUID(), name: trimmedName, command: trimmedCommand)]
+        }
+        terminalBarCommands = updatedCommands
+        Self.saveTerminalBarCommands(updatedCommands, for: projectID)
+    }
+
+    private func deleteTerminalBarCommand(_ id: UUID) {
+        let updatedCommands = terminalBarCommands.filter { $0.id != id }
+        terminalBarCommands = updatedCommands
+        Self.saveTerminalBarCommands(updatedCommands, for: projectID)
+    }
+
+    private static func terminalBarCommandsStorageKey(for projectID: UUID) -> String {
+        "terminalBarCommands.\(projectID.uuidString)"
+    }
+
+    private static func loadTerminalBarCommands(for projectID: UUID) -> [TerminalBarCommand] {
+        let key = terminalBarCommandsStorageKey(for: projectID)
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let commands = try? JSONDecoder().decode([TerminalBarCommand].self, from: data) else {
+            return defaultTerminalBarCommands
+        }
+        return commands
+    }
+
+    private static func saveTerminalBarCommands(_ commands: [TerminalBarCommand], for projectID: UUID) {
+        let key = terminalBarCommandsStorageKey(for: projectID)
+        guard let data = try? JSONEncoder().encode(commands) else { return }
+        UserDefaults.standard.set(data, forKey: key)
+    }
+
     private var windowTabs: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 3) {
@@ -264,6 +425,68 @@ private struct WindowControlBar: View {
         }
         .fixedSize(horizontal: true, vertical: false)
         .padding(.trailing, 10)
+    }
+}
+
+private struct TerminalBarCommandEditorPopover: View {
+    let initialName: String
+    let initialCommand: String
+    let onSave: (String, String) -> Void
+    let onCancel: () -> Void
+
+    @Environment(\.appConfig) private var appConfig
+    @State private var name = ""
+    @State private var command = ""
+    @FocusState private var focusedField: Field?
+
+    private enum Field {
+        case name
+        case command
+    }
+
+    private var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedCommand: String {
+        command.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            TextField("Command name", text: $name)
+                .textFieldStyle(.roundedBorder)
+                .focused($focusedField, equals: .name)
+
+            TextField("Actual command", text: $command)
+                .textFieldStyle(.roundedBorder)
+                .fontDesign(.monospaced)
+                .focused($focusedField, equals: .command)
+                .onSubmit(save)
+
+            HStack {
+                Button("Cancel") { onCancel() }
+                    .keyboardShortcut(.cancelAction)
+
+                Spacer()
+
+                Button("Save") { save() }
+                    .keyboardShortcut(.return, modifiers: .command)
+                    .disabled(trimmedName.isEmpty || trimmedCommand.isEmpty)
+            }
+        }
+        .padding(24)
+        .frame(width: min(CGFloat(appConfig.ui.quickCommandsWidth), 360))
+        .onAppear {
+            name = initialName
+            command = initialCommand
+            focusedField = .name
+        }
+    }
+
+    private func save() {
+        guard !trimmedName.isEmpty, !trimmedCommand.isEmpty else { return }
+        onSave(trimmedName, trimmedCommand)
     }
 }
 

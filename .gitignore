@@ -9,6 +9,7 @@ xcuserdata/
 .build/
 .swiftpm/
 Package.resolved
+.run-branch-build/
 
 # macOS
 .DS_Store

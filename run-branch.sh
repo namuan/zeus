@@ -38,8 +38,10 @@ BUNDLE_ID="com.zeus.OpenZeus.${SANITIZED_BRANCH}"
 APP_SUPPORT="$HOME/Library/Application Support"
 BRANCH_DIR="${APP_SUPPORT}/${APP_DIR_NAME}"
 CONFIG_FILE="${BRANCH_DIR}/config.json"
-BINARY_SRC="$ROOT/.build/debug/OpenZeus"
-BUNDLE="$ROOT/.build/${APP_DIR_NAME}.app"
+RUN_BRANCH_BUILD_ROOT="$ROOT/.run-branch-build"
+SCRATCH_DIR="${RUN_BRANCH_BUILD_ROOT}/${APP_DIR_NAME}-scratch"
+BINARY_SRC="${SCRATCH_DIR}/debug/OpenZeus"
+BUNDLE="${RUN_BRANCH_BUILD_ROOT}/${APP_DIR_NAME}.app"
 
 echo "Branch  : $RAW_BRANCH"
 echo "App dir : $APP_DIR_NAME"
@@ -64,9 +66,11 @@ CONFIG_JSON
 fi
 
 # --- Build ---
-echo "Building OpenZeus (debug)..."
+echo "Building OpenZeus (debug, fresh scratch build)..."
 cd "$ROOT"
-swift build
+rm -rf "$SCRATCH_DIR"
+mkdir -p "$RUN_BRANCH_BUILD_ROOT"
+swift build --scratch-path "$SCRATCH_DIR"
 
 if [ ! -f "$BINARY_SRC" ]; then
   echo "Error: binary not found at: $BINARY_SRC" >&2
@@ -83,7 +87,7 @@ cp "$BINARY_SRC" "$BUNDLE/Contents/MacOS/OpenZeus"
 chmod +x "$BUNDLE/Contents/MacOS/OpenZeus"
 
 # Copy icon if available
-ICON_ICNS="$ROOT/.build/AppIcon.icns"
+ICON_ICNS="${SCRATCH_DIR}/AppIcon.icns"
 if [ -f "$ICON_ICNS" ]; then
   cp "$ICON_ICNS" "$BUNDLE/Contents/Resources/AppIcon.icns"
 fi
