@@ -112,6 +112,19 @@ private struct TerminalPaneContent: View {
 }
 
 private struct WindowControlBar: View {
+    private struct SampleTerminalCommand: Identifiable {
+        let title: String
+        let systemImage: String
+        let command: String
+
+        var id: String { title }
+    }
+
+    private static let sampleTerminalCommands: [SampleTerminalCommand] = [
+        SampleTerminalCommand(title: "PWD", systemImage: "folder", command: "pwd"),
+        SampleTerminalCommand(title: "Echo", systemImage: "text.bubble", command: "echo 'Hello from OpenZeus top bar'")
+    ]
+
     @ObservedObject var entry: TerminalEntry
     let projectID: UUID
     let workingDirectory: String
@@ -133,6 +146,8 @@ private struct WindowControlBar: View {
             terminalControls
             Divider().frame(height: 16)
             GitControlsView(workingDirectory: workingDirectory, gitExecutablePath: appConfig.git.executablePath)
+            Divider().frame(height: 16)
+            sampleCommandControls
             Spacer()
         }
         .buttonStyle(.borderless)
@@ -231,6 +246,22 @@ private struct WindowControlBar: View {
         }
 
         Divider().frame(height: 16)
+    }
+
+    private var sampleCommandControls: some View {
+        HStack(spacing: 4) {
+            ForEach(Self.sampleTerminalCommands) { sample in
+                Button {
+                    logInfo("WindowControlBar: sample command '\(sample.command)' sent")
+                    entry.sendCommand(sample.command)
+                } label: {
+                    Label(sample.title, systemImage: sample.systemImage)
+                        .labelStyle(.titleAndIcon)
+                        .font(.caption)
+                }
+                .help(sample.command)
+            }
+        }
     }
 
     private var windowTabs: some View {
