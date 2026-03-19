@@ -1,7 +1,7 @@
 import Foundation
 
 /// Git statistics for display in the UI.
-struct GitStats: Sendable {
+struct GitStats: Sendable, Equatable {
     let staged: Int
     let unstaged: Int
     let untracked: Int
@@ -37,7 +37,7 @@ final class GitService: ObservableObject {
 
         do {
             let stats = try await computeStats()
-            self.stats = stats
+            if self.stats != stats { self.stats = stats }
         } catch {
             lastError = error.localizedDescription
             stats = nil
