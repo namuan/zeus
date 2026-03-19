@@ -133,6 +133,7 @@ private struct WindowControlBar: View {
             terminalControls
             Divider().frame(height: 16)
             GitControlsView(workingDirectory: workingDirectory, gitExecutablePath: appConfig.git.executablePath)
+                .id(workingDirectory)
             Spacer()
         }
         .buttonStyle(.borderless)
