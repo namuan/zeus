@@ -125,12 +125,20 @@ struct NewTaskSheet: View {
     let project: Project
     var onCreated: (AgentTask) -> Void = { _ in }
 
+    @State private var taskID = UUID()
     @State private var text = ""
     @State private var createWorktree = false
+    @State private var branchNameOverride = ""
 
     private static let placeholder = "Task title…\n\nTask description…"
 
     private var worktreeConfigured: Bool { !appConfig.worktree.resolvedBasePath.isEmpty }
+
+    private var derivedTitle: String { text.firstLineTitle }
+
+    private var branchPlaceholder: String {
+        "Auto: \(WorktreeService.branchName(for: taskID, taskName: derivedTitle))"
+    }
 
     var body: some View {
         VStack(spacing: 16) {
@@ -171,6 +179,13 @@ struct NewTaskSheet: View {
             .disabled(!worktreeConfigured)
             .frame(maxWidth: .infinity, alignment: .leading)
 
+            if createWorktree && worktreeConfigured {
+                TextField(branchPlaceholder, text: $branchNameOverride)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                    .frame(maxWidth: .infinity)
+            }
+
             HStack {
                 Button("Discard") { dismiss() }
                     .keyboardShortcut(.cancelAction)
@@ -189,11 +204,10 @@ struct NewTaskSheet: View {
 
     private func save() {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let title = trimmed.components(separatedBy: "\n").first?.trimmingCharacters(in: .whitespaces) ?? trimmed
         let task = AgentTask(
-            id: UUID(),
+            id: taskID,
             projectID: project.id,
-            name: title.isEmpty ? trimmed : title,
+            name: derivedTitle.isEmpty ? trimmed : derivedTitle,
             taskDescription: trimmed,
             command: appConfig.terminal.resolvedShell,
             environment: [:],
@@ -218,7 +232,8 @@ struct NewTaskSheet: View {
                         taskName: taskName,
                         repoPath: repoPath,
                         projectSlug: projectSlug,
-                        config: worktreeConfig
+                        config: worktreeConfig,
+                        branchNameOverride: branchNameOverride.trimmingCharacters(in: .whitespacesAndNewlines)
                     )
                     if var updated = appDatabase.task(id: taskID) {
                         updated.worktreePath = result.path
@@ -392,10 +407,18 @@ private struct EditTaskSheet: View {
     private func save() {
         let trimmed = description.trimmingCharacters(in: .whitespacesAndNewlines)
         var updated = task
-        updated.name = trimmed.components(separatedBy: "\n").first?.trimmingCharacters(in: .whitespaces) ?? trimmed
+        updated.name = description.firstLineTitle
         updated.taskDescription = trimmed
         appDatabase.updateTask(updated)
         dismiss()
+    }
+}
+
+private extension String {
+    /// Returns the first non-empty line, trimmed of surrounding whitespace.
+    var firstLineTitle: String {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.components(separatedBy: "\n").first?.trimmingCharacters(in: .whitespaces) ?? trimmed
     }
 }
 
