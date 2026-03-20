@@ -1,0 +1,1 @@
+Redesigned ProjectList.swift: replaced native List selection highlight with custom accentColor.opacity(0.12) background matching TaskList, added folder icon, hover-delete on icon, running task count badge, stable row height via opacity, and confirmation dialog for delete.
