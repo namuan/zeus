@@ -28,20 +28,6 @@
 - Impact: Reduced maintainability; difficult to navigate and test
 - Fix approach: Extract sub-views, view models, and helpers into separate files
 
-## Known Bugs
-
-**Silent Error Swallowing in Process Execution:**
-- Symptoms: Failed tmux commands or git operations fail silently
-- Files: `Sources/OpenZeus/Views/TerminalStore.swift` (`runProcessOutput` function, lines 366-392)
-- Trigger: Any tmux or shell command that exits with non-zero status
-- Workaround: Errors are logged but user sees no feedback
-
-**Configuration Save Race Condition:**
-- Symptoms: Rapid config changes may result in lost updates
-- Files: `Sources/OpenZeus/Views/SettingsView.swift` (lines 55-63)
-- Trigger: Multiple rapid config changes within 500ms debounce window
-- Workaround: Changes persist on view disappear
-
 ## Security Considerations
 
 **No Sandboxing (Intentional):**
