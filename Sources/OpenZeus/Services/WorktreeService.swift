@@ -41,12 +41,15 @@ final class WorktreeService: Sendable {
         taskName: String,
         repoPath: String,
         projectSlug: String,
-        config: WorktreeConfig
+        config: WorktreeConfig,
+        branchNameOverride: String = ""
     ) async throws -> WorktreeResult {
         let basePath = config.resolvedBasePath
         guard !basePath.isEmpty else { throw WorktreeError.notConfigured }
 
-        let branch = Self.branchName(for: taskID, taskName: taskName)
+        let branch = branchNameOverride.isEmpty
+            ? Self.branchName(for: taskID, taskName: taskName)
+            : branchNameOverride
         let parentDir = "\(basePath)/\(projectSlug)"
         let worktreePath = "\(parentDir)/\(taskID.uuidString)"
 
