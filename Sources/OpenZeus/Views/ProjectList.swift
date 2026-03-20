@@ -1,23 +1,24 @@
 import SwiftUI
 
 struct ProjectList: View {
-    @EnvironmentObject var appDatabase: AppDatabase
-    @EnvironmentObject var terminalStore: TerminalStore
+    @EnvironmentObject private var appDatabase: AppDatabase
+    @EnvironmentObject private var terminalStore: TerminalStore
     @Binding var selection: Project?
     let activeTask: AgentTask?
 
+    @State private var projectToDelete: Project?
+
     var body: some View {
-        List(selection: $selection) {
+        List {
             ForEach(appDatabase.projects) { project in
                 ProjectRow(
                     project: project,
                     activeTask: activeTask,
                     isSelected: selection == project,
-                    hasActiveProcess: appDatabase.tasks(for: project.id)
-                        .contains { terminalStore.activeProcessTaskIDs.contains($0.id) },
-                    onRemove: { removeProject(project) }
+                    runningTaskCount: runningTaskCount(for: project),
+                    onSelect: { selection = project },
+                    onRemove: { projectToDelete = project }
                 )
-                .tag(project)
             }
             .onDelete(perform: deleteProjects)
         }
@@ -29,6 +30,26 @@ struct ProjectList: View {
                 }
             }
         }
+        .confirmationDialog(
+            "Delete \"\(projectToDelete?.name ?? "Project")\"?",
+            isPresented: Binding(
+                get: { projectToDelete != nil },
+                set: { if !$0 { projectToDelete = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let project = projectToDelete { removeProject(project) }
+            }
+        } message: {
+            Text("All tasks for this project will also be deleted. This cannot be undone.")
+        }
+    }
+
+    private func runningTaskCount(for project: Project) -> Int {
+        appDatabase.tasks(for: project.id)
+            .filter { terminalStore.activeProcessTaskIDs.contains($0.id) }
+            .count
     }
 
     private func addProject() {
@@ -59,54 +80,102 @@ private struct ProjectRow: View {
     let project: Project
     let activeTask: AgentTask?
     let isSelected: Bool
-    let hasActiveProcess: Bool
+    let runningTaskCount: Int
+    let onSelect: () -> Void
     let onRemove: () -> Void
 
     @State private var isHovered = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .center, spacing: 6) {
+        HStack(spacing: 10) {
+            projectIcon
+
+            VStack(alignment: .leading, spacing: 2) {
                 Text(project.name)
                     .font(.headline)
-                if hasActiveProcess {
-                    Circle()
-                        .fill(isSelected ? Color.white : Color.green)
-                        .frame(width: 6, height: 6)
-                }
-            }
-            Text(project.directoryURL.path(percentEncoded: false))
-                .font(.caption)
-                .foregroundStyle(isSelected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-                .lineLimit(1)
-                .truncationMode(.middle)
-            if let task = activeTask, task.projectID == project.id {
-                Label(task.name, systemImage: "terminal.fill")
-                    .font(.caption2)
-                    .foregroundStyle(isSelected ? AnyShapeStyle(.primary) : AnyShapeStyle(Color.accentColor))
+                    .lineLimit(1)
+
+                Text(project.directoryURL.path(percentEncoded: false))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .padding(.top, 2)
+
+                let taskForProject = activeTask.flatMap { $0.projectID == project.id ? $0 : nil }
+                activeTaskLabel(taskForProject)
+                    .opacity(taskForProject != nil ? 1 : 0)
+            }
+
+            Spacer(minLength: 0)
+
+            if runningTaskCount > 0 {
+                runningBadge
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 2)
-        .overlay(alignment: .trailing) {
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .contentShape(Rectangle())
+        .onTapGesture { onSelect() }
+        .onHover { isHovered = $0 }
+        .contextMenu {
+            Button(role: .destructive, action: onRemove) {
+                Label("Delete Project", systemImage: "trash")
+            }
+        }
+    }
+
+    private var projectIcon: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.accentColor.opacity(0.12))
+                .frame(width: 32, height: 32)
+
             if isHovered {
                 Button(action: onRemove) {
-                    ZStack {
-                        Circle()
-                            .fill(.white)
-                            .frame(width: 22, height: 22)
-                        Image(systemName: "trash")
-                            .foregroundStyle(.red)
-                            .font(.system(size: 11))
-                    }
+                    Image(systemName: "trash")
+                        .foregroundStyle(.red)
+                        .font(.system(size: 13))
                 }
                 .buttonStyle(.borderless)
                 .help("Delete Project")
+            } else {
+                Image(systemName: "folder.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(Color.accentColor)
+                    .symbolRenderingMode(.hierarchical)
             }
         }
-        .onHover { isHovered = $0 }
+    }
+
+    private var runningBadge: some View {
+        HStack(spacing: 3) {
+            Circle()
+                .fill(Color.green)
+                .frame(width: 5, height: 5)
+
+            if runningTaskCount > 1 {
+                Text("\(runningTaskCount)")
+                    .font(.caption2.monospacedDigit())
+                    .fontWeight(.medium)
+                    .foregroundStyle(.green)
+            }
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background {
+            Capsule()
+                .fill(Color.green.opacity(0.12))
+        }
+    }
+
+    private func activeTaskLabel(_ task: AgentTask?) -> some View {
+        Label(task?.name ?? "", systemImage: "terminal.fill")
+            .font(.caption2)
+            .foregroundStyle(Color.accentColor)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .padding(.top, 1)
     }
 }
