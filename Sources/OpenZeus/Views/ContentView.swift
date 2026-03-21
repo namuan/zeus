@@ -52,7 +52,10 @@ struct ContentView: View {
             }
         } detail: {
             if let task = selectedTask {
-                TerminalPane(task: task)
+                TerminalPane(
+                    task: task,
+                    projectDirectory: selectedProject?.directoryURL.path(percentEncoded: false) ?? task.workingDirectory.path(percentEncoded: false)
+                )
             } else if let project = selectedProject {
                 NoTaskDetailPane(project: project)
             } else {
