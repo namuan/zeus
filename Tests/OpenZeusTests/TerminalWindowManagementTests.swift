@@ -63,14 +63,14 @@ private func killTmuxSessionSync(_ tmux: String, sessionName: String) {
 
 @Test func zeusCommandVariablesExpandProjectDirectoryToken() {
     let command = "./run.sh \(ZeusCommandVariables.projectDirectoryToken)"
-    let expanded = ZeusCommandVariables.expand(command, workingDirectory: "/tmp/my-project")
+    let expanded = ZeusCommandVariables.expand(command, projectDirectory: "/tmp/my-project")
 
     #expect(expanded == "./run.sh /tmp/my-project")
 }
 
 @Test func zeusCommandVariablesLeaveTemplateWhenWorkingDirectoryMissing() {
     let command = "./run.sh \(ZeusCommandVariables.projectDirectoryToken)"
-    let expanded = ZeusCommandVariables.expand(command, workingDirectory: "   ")
+    let expanded = ZeusCommandVariables.expand(command, projectDirectory: "   ")
 
     #expect(expanded == command)
 }
@@ -139,11 +139,13 @@ private func killTmuxSessionSync(_ tmux: String, sessionName: String) {
         taskID: taskID,
         name: "Test Task",
         watchMode: .on,
-        workingDirectory: "/tmp"
+        workingDirectory: "/tmp",
+        projectDirectory: "/project"
     )
 
     let entry = store.entry(for: taskID)
     #expect(entry.workingDirectory == "/tmp")
+    #expect(entry.projectDirectory == "/project")
 }
 
 @Test @MainActor func terminalStoreKillSessionCreatesNewEntryTest() {
@@ -694,21 +696,25 @@ private func killTmuxSessionSync(_ tmux: String, sessionName: String) {
         taskID: taskID,
         name: "Pre-created",
         watchMode: .silent,
-        workingDirectory: "/pre"
+        workingDirectory: "/pre",
+        projectDirectory: "/project-pre"
     )
 
     // Now create entry - workingDirectory won't be set since entry didn't exist
     let entry = store.entry(for: taskID)
     #expect(entry.workingDirectory.isEmpty)
+    #expect(entry.projectDirectory.isEmpty)
 
     // Update metadata after entry exists - now workingDirectory is set
     store.updateTaskMetadata(
         taskID: taskID,
         name: "Updated",
         watchMode: .on,
-        workingDirectory: "/updated"
+        workingDirectory: "/updated",
+        projectDirectory: "/project-updated"
     )
     #expect(entry.workingDirectory == "/updated")
+    #expect(entry.projectDirectory == "/project-updated")
 }
 
 @Test @MainActor func tmuxSessionNameFormatTest() {
