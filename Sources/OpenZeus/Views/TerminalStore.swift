@@ -7,12 +7,12 @@ enum ZeusCommandVariables {
     static let supportedTokens = [projectDirectoryToken]
     static let helpText = "Available variable: \(supportedTokens.joined(separator: ", "))"
 
-    static func expand(_ command: String, workingDirectory: String) -> String {
+    static func expand(_ command: String, projectDirectory: String) -> String {
         guard command.contains(projectDirectoryToken) else { return command }
-        let resolvedWorkingDirectory = workingDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !resolvedWorkingDirectory.isEmpty else { return command }
+        let resolvedProjectDirectory = projectDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !resolvedProjectDirectory.isEmpty else { return command }
 
-        return command.replacingOccurrences(of: projectDirectoryToken, with: resolvedWorkingDirectory)
+        return command.replacingOccurrences(of: projectDirectoryToken, with: resolvedProjectDirectory)
     }
 }
 
@@ -53,6 +53,9 @@ final class TerminalEntry: ObservableObject {
     }
     var workingDirectory: String = "" {
         didSet { logDebug("workingDirectory changed: '\(workingDirectory)'") }
+    }
+    var projectDirectory: String = "" {
+        didSet { logDebug("projectDirectory changed: '\(projectDirectory)'") }
     }
 
     let config: TerminalConfig
@@ -336,10 +339,10 @@ final class TerminalEntry: ObservableObject {
     }
 
     func sendCommand(_ command: String, inNewVerticalPane: Bool = false) {
-        let expandedCommand = ZeusCommandVariables.expand(command, workingDirectory: workingDirectory)
+        let expandedCommand = ZeusCommandVariables.expand(command, projectDirectory: projectDirectory)
         logInfo("sendCommand: '\(command)', inNewVerticalPane=\(inNewVerticalPane), tmuxUnavailable=\(tmuxUnavailable)")
         if expandedCommand != command {
-            logInfo("sendCommand: expanded variables using workingDirectory='\(workingDirectory)'")
+            logInfo("sendCommand: expanded variables using projectDirectory='\(projectDirectory)'")
         }
 
         if !tmuxUnavailable, let tmux = tmuxExecutable(searchPaths: config.tmuxSearchPaths) {
@@ -493,10 +496,11 @@ final class TerminalStore: ObservableObject {
     }
 
     /// Update cached metadata for a task (call when the task's terminal opens or watch mode changes).
-    func updateTaskMetadata(taskID: UUID, name: String, watchMode: WatchMode, workingDirectory: String = "") {
-        logInfo("TerminalStore.updateTaskMetadata: task=\(taskID.uuidString), name='\(name)', watchMode=\(watchMode), cwd='\(workingDirectory)'")
+    func updateTaskMetadata(taskID: UUID, name: String, watchMode: WatchMode, workingDirectory: String = "", projectDirectory: String = "") {
+        logInfo("TerminalStore.updateTaskMetadata: task=\(taskID.uuidString), name='\(name)', watchMode=\(watchMode), cwd='\(workingDirectory)', projectDirectory='\(projectDirectory)'")
         taskMetadata[taskID] = (name: name, watchMode: watchMode)
         entries[taskID]?.workingDirectory = workingDirectory
+        entries[taskID]?.projectDirectory = projectDirectory
     }
 
     private func installOptionKeyMonitor() {
