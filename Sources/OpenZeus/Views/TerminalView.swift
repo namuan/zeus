@@ -158,6 +158,7 @@ private struct TerminalBarCommandEditorState: Equatable {
 
 private struct WindowControlBar: View {
     private static let defaultTerminalBarCommands: [TerminalBarCommand] = []
+    private static let terminalBarCommandsStorageKey = "terminalBarCommands"
 
     @ObservedObject var entry: TerminalEntry
     let projectID: UUID
@@ -396,32 +397,42 @@ private struct WindowControlBar: View {
             updatedCommands = terminalBarCommands + [TerminalBarCommand(id: UUID(), name: trimmedName, command: trimmedCommand, colorName: colorName)]
         }
         terminalBarCommands = updatedCommands
-        Self.saveTerminalBarCommands(updatedCommands, for: projectID)
+        Self.saveTerminalBarCommands(updatedCommands)
     }
 
     private func deleteTerminalBarCommand(_ id: UUID) {
         let updatedCommands = terminalBarCommands.filter { $0.id != id }
         terminalBarCommands = updatedCommands
-        Self.saveTerminalBarCommands(updatedCommands, for: projectID)
+        Self.saveTerminalBarCommands(updatedCommands)
     }
 
-    private static func terminalBarCommandsStorageKey(for projectID: UUID) -> String {
+    private static func legacyTerminalBarCommandsStorageKey(for projectID: UUID) -> String {
         "terminalBarCommands.\(projectID.uuidString)"
     }
 
     private static func loadTerminalBarCommands(for projectID: UUID) -> [TerminalBarCommand] {
-        let key = terminalBarCommandsStorageKey(for: projectID)
-        guard let data = UserDefaults.standard.data(forKey: key),
-              let commands = try? JSONDecoder().decode([TerminalBarCommand].self, from: data) else {
+        if let commands = loadTerminalBarCommands(forKey: terminalBarCommandsStorageKey) {
+            return commands
+        }
+
+        let legacyKey = legacyTerminalBarCommandsStorageKey(for: projectID)
+        guard let commands = loadTerminalBarCommands(forKey: legacyKey) else {
             return defaultTerminalBarCommands
         }
+
+        saveTerminalBarCommands(commands)
+        UserDefaults.standard.removeObject(forKey: legacyKey)
         return commands
     }
 
-    private static func saveTerminalBarCommands(_ commands: [TerminalBarCommand], for projectID: UUID) {
-        let key = terminalBarCommandsStorageKey(for: projectID)
+    private static func loadTerminalBarCommands(forKey key: String) -> [TerminalBarCommand]? {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        return try? JSONDecoder().decode([TerminalBarCommand].self, from: data)
+    }
+
+    private static func saveTerminalBarCommands(_ commands: [TerminalBarCommand]) {
         guard let data = try? JSONEncoder().encode(commands) else { return }
-        UserDefaults.standard.set(data, forKey: key)
+        UserDefaults.standard.set(data, forKey: terminalBarCommandsStorageKey)
     }
 
     private var windowTabs: some View {
