@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct ProjectList: View {
@@ -17,7 +18,8 @@ struct ProjectList: View {
                     isSelected: selection == project,
                     runningTaskCount: runningTaskCount(for: project),
                     onSelect: { selection = project },
-                    onRemove: { projectToDelete = project }
+                    onRemove: { projectToDelete = project },
+                    onOpenInFinder: { openInFinder(project) }
                 )
             }
             .onDelete(perform: deleteProjects)
@@ -74,6 +76,10 @@ struct ProjectList: View {
     private func deleteProjects(offsets: IndexSet) {
         for index in offsets { removeProject(appDatabase.projects[index]) }
     }
+
+    private func openInFinder(_ project: Project) {
+        NSWorkspace.shared.open(project.directoryURL)
+    }
 }
 
 private struct ProjectRow: View {
@@ -83,6 +89,7 @@ private struct ProjectRow: View {
     let runningTaskCount: Int
     let onSelect: () -> Void
     let onRemove: () -> Void
+    let onOpenInFinder: () -> Void
 
     @State private var isHovered = false
 
@@ -120,6 +127,9 @@ private struct ProjectRow: View {
         .onTapGesture { onSelect() }
         .onHover { isHovered = $0 }
         .contextMenu {
+            Button(action: onOpenInFinder) {
+                Label("Open in Finder", systemImage: "folder")
+            }
             Button(role: .destructive, action: onRemove) {
                 Label("Delete Project", systemImage: "trash")
             }
