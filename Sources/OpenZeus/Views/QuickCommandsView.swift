@@ -83,6 +83,10 @@ struct QuickCommandsPopover: View {
                 .help("Add command (project-specific)")
             }
             .padding(10)
+
+            CommandVariablesHelpText()
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
         }
         .frame(width: CGFloat(appConfig.ui.quickCommandsWidth))
         .frame(minHeight: CGFloat(appConfig.ui.quickCommandsMinHeight))
@@ -119,6 +123,15 @@ private struct SectionHeader: View {
             .padding(.horizontal, 12)
             .padding(.top, 8)
             .padding(.bottom, 2)
+    }
+}
+
+struct CommandVariablesHelpText: View {
+    var body: some View {
+        Text(ZeusCommandVariables.helpText)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

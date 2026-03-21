@@ -61,6 +61,20 @@ private func killTmuxSessionSync(_ tmux: String, sessionName: String) {
     #expect(entry.workingDirectory.isEmpty)
 }
 
+@Test func zeusCommandVariablesExpandProjectDirectoryToken() {
+    let command = "./run.sh \(ZeusCommandVariables.projectDirectoryToken)"
+    let expanded = ZeusCommandVariables.expand(command, workingDirectory: "/tmp/my-project")
+
+    #expect(expanded == "./run.sh /tmp/my-project")
+}
+
+@Test func zeusCommandVariablesLeaveTemplateWhenWorkingDirectoryMissing() {
+    let command = "./run.sh \(ZeusCommandVariables.projectDirectoryToken)"
+    let expanded = ZeusCommandVariables.expand(command, workingDirectory: "   ")
+
+    #expect(expanded == command)
+}
+
 @Test @MainActor func terminalEntryRunningStateToggleTest() {
     let entry = TerminalEntry(taskID: UUID())
 

@@ -506,6 +506,8 @@ private struct TerminalBarCommandEditorPopover: View {
                 .focused($focusedField, equals: .command)
                 .onSubmit(save)
 
+            CommandVariablesHelpText()
+
             VStack(alignment: .leading, spacing: 6) {
                 Text("Color")
                     .font(.caption)
