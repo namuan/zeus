@@ -1,0 +1,1 @@
+Adds Open in Terminal to project context menu. Caches Terminal app URL as static let to avoid repeated system lookups.
