@@ -19,7 +19,8 @@ struct ProjectList: View {
                     runningTaskCount: runningTaskCount(for: project),
                     onSelect: { selection = project },
                     onRemove: { projectToDelete = project },
-                    onOpenInFinder: { openInFinder(project) }
+                    onOpenInFinder: { openInFinder(project) },
+                    onOpenInTerminal: { openInTerminal(project) }
                 )
             }
             .onDelete(perform: deleteProjects)
@@ -80,6 +81,19 @@ struct ProjectList: View {
     private func openInFinder(_ project: Project) {
         NSWorkspace.shared.open(project.directoryURL)
     }
+
+    private static let terminalAppURL = NSWorkspace.shared.urlForApplication(
+        withBundleIdentifier: "com.apple.Terminal"
+    )
+
+    private func openInTerminal(_ project: Project) {
+        guard let terminalURL = Self.terminalAppURL else { return }
+        NSWorkspace.shared.open(
+            [project.directoryURL],
+            withApplicationAt: terminalURL,
+            configuration: NSWorkspace.OpenConfiguration()
+        )
+    }
 }
 
 private struct ProjectRow: View {
@@ -90,6 +104,7 @@ private struct ProjectRow: View {
     let onSelect: () -> Void
     let onRemove: () -> Void
     let onOpenInFinder: () -> Void
+    let onOpenInTerminal: () -> Void
 
     @State private var isHovered = false
 
@@ -129,6 +144,9 @@ private struct ProjectRow: View {
         .contextMenu {
             Button(action: onOpenInFinder) {
                 Label("Open in Finder", systemImage: "folder")
+            }
+            Button(action: onOpenInTerminal) {
+                Label("Open in Terminal", systemImage: "terminal")
             }
             Button(role: .destructive, action: onRemove) {
                 Label("Delete Project", systemImage: "trash")
