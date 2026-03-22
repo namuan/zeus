@@ -3,9 +3,11 @@ import GRDB
 
 struct ProjectApp: Identifiable {
     var id: UUID
-    var projectID: UUID
+    var projectID: UUID?  // nil = global app (appears in all projects)
     var appPath: String
     var displayName: String
+
+    var isGlobal: Bool { projectID == nil }
 }
 
 extension ProjectApp: Equatable {}
@@ -17,7 +19,7 @@ extension ProjectApp: Hashable {
 extension ProjectApp: FetchableRecord {
     init(row: Row) throws {
         id = UUID(uuidString: row["id"]) ?? UUID()
-        projectID = UUID(uuidString: row["projectId"]) ?? UUID()
+        projectID = (row["projectId"] as String?).flatMap { UUID(uuidString: $0) }
         appPath = row["appPath"]
         displayName = row["displayName"]
     }
@@ -28,7 +30,7 @@ extension ProjectApp: PersistableRecord {
 
     func encode(to container: inout PersistenceContainer) throws {
         container["id"] = id.uuidString
-        container["projectId"] = projectID.uuidString
+        container["projectId"] = projectID?.uuidString
         container["appPath"] = appPath
         container["displayName"] = displayName
     }

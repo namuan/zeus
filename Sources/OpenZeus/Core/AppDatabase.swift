@@ -102,6 +102,19 @@ final class AppDatabase: ObservableObject {
                 t.add(column: "isDeleted", .integer).notNull().defaults(to: 0)
             }
         }
+        migrator.registerMigration("v12") { db in
+            try db.execute(sql: """
+                CREATE TABLE projectApps_new (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    projectId TEXT REFERENCES projects(id) ON DELETE CASCADE,
+                    appPath TEXT NOT NULL,
+                    displayName TEXT NOT NULL
+                )
+            """)
+            try db.execute(sql: "INSERT INTO projectApps_new SELECT * FROM projectApps")
+            try db.execute(sql: "DROP TABLE projectApps")
+            try db.execute(sql: "ALTER TABLE projectApps_new RENAME TO projectApps")
+        }
         try migrator.migrate(db)
         // Remove stale records left by abandoned-branch migrations (v5, v9, v10).
         // These were never part of the canonical schema; deleting them keeps
@@ -201,7 +214,7 @@ final class AppDatabase: ObservableObject {
     // MARK: - Project Apps
 
     func projectApps(for projectID: UUID) -> [ProjectApp] {
-        projectApps.filter { $0.projectID == projectID }
+        projectApps.filter { $0.projectID == projectID || $0.isGlobal }
     }
 
     func insertProjectApp(_ app: ProjectApp) {
@@ -211,6 +224,18 @@ final class AppDatabase: ObservableObject {
     func deleteProjectApp(id: UUID) {
         try? dbQueue.write { db in
             try db.execute(sql: "DELETE FROM projectApps WHERE id = ?", arguments: [id.uuidString])
+        }
+    }
+
+    func promoteProjectAppToGlobal(id: UUID) {
+        try? dbQueue.write { db in
+            try db.execute(sql: "UPDATE projectApps SET projectId = NULL WHERE id = ?", arguments: [id.uuidString])
+        }
+    }
+
+    func demoteProjectAppToLocal(id: UUID, projectID: UUID) {
+        try? dbQueue.write { db in
+            try db.execute(sql: "UPDATE projectApps SET projectId = ? WHERE id = ?", arguments: [projectID.uuidString, id.uuidString])
         }
     }
 
