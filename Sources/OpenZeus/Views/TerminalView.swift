@@ -684,6 +684,20 @@ private struct AppLauncherBar: View {
             ForEach(apps) { app in
                 AppLauncherButton(app: app, workingDirectory: workingDirectory)
                     .contextMenu {
+                        if app.isGlobal {
+                            Button {
+                                db.demoteProjectAppToLocal(id: app.id, projectID: projectID)
+                            } label: {
+                                Label("Demote to Local", systemImage: "pin")
+                            }
+                        } else {
+                            Button {
+                                db.promoteProjectAppToGlobal(id: app.id)
+                            } label: {
+                                Label("Promote to Global", systemImage: "globe")
+                            }
+                        }
+                        Divider()
                         Button("Remove \(app.displayName)", role: .destructive) {
                             db.deleteProjectApp(id: app.id)
                         }
@@ -746,9 +760,23 @@ private struct AppLauncherButton: View {
             ) { _, _ in }
         } label: {
             HStack(spacing: 3) {
-                Image(nsImage: icon)
-                    .resizable()
-                    .frame(width: 14, height: 14)
+                ZStack(alignment: .bottomTrailing) {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .frame(width: 14, height: 14)
+                    if app.isGlobal {
+                        Image(systemName: "globe")
+                            .font(.system(size: 6, weight: .bold))
+                            .foregroundStyle(.white)
+                            .background(
+                                Circle()
+                                    .fill(Color.accentColor)
+                                    .frame(width: 8, height: 8)
+                            )
+                            .offset(x: 3, y: 3)
+                    }
+                }
+                .frame(width: 17, height: 17)
                 Text(app.displayName)
                     .font(.caption)
             }
