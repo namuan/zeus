@@ -77,7 +77,12 @@ struct TaskList: View {
             Text("This cannot be undone.")
         }
         .sheet(isPresented: $showingNewTask) {
-            NewTaskSheet(project: project)
+            NewTaskSheet(
+                project: project,
+                onCreated: projectTasks.isEmpty ? { newTask in
+                    selection = newTask
+                } : nil
+            )
         }
     }
 
@@ -123,7 +128,7 @@ struct NewTaskSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.appConfig) private var appConfig
     let project: Project
-    var onCreated: (AgentTask) -> Void = { _ in }
+    var onCreated: ((AgentTask) -> Void)?
 
     @State private var taskID = UUID()
     @State private var text = ""
@@ -216,7 +221,7 @@ struct NewTaskSheet: View {
         )
         appDatabase.insertTask(task)
         dismiss()
-        onCreated(task)
+        onCreated?(task)
 
         if createWorktree {
             let taskID = task.id
