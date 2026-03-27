@@ -24,9 +24,99 @@ final class GitService: ObservableObject {
     private let workingDirectory: String
     private let gitExecutablePath: String
 
-    init(workingDirectory: String, gitExecutablePath: String = "/usr/bin/git") {
+    // MARK: - Auto-refresh state
+    private var watchedSources: [DispatchSourceFileSystemObject] = []
+    private var debounceTask: Task<Void, Never>?
+    private var pollingTask: Task<Void, Never>?
+
+    private let debounceDelay: Duration
+    private let remotePollInterval: Duration
+
+    init(
+        workingDirectory: String,
+        gitExecutablePath: String = "/usr/bin/git",
+        statusDebounceMs: Int = 300,
+        statusPollIntervalSeconds: Int = 30
+    ) {
         self.workingDirectory = workingDirectory
         self.gitExecutablePath = gitExecutablePath
+        self.debounceDelay = .milliseconds(statusDebounceMs)
+        self.remotePollInterval = .seconds(statusPollIntervalSeconds)
+    }
+
+    // MARK: - Watching
+
+    /// Start watching `.git` index/HEAD/FETCH_HEAD for local changes and
+    /// polling every 30 s for remote-tracking updates.
+    func startWatching() {
+        guard watchedSources.isEmpty else { return }
+
+        let gitDir = (workingDirectory as NSString).appendingPathComponent(".git")
+        let filesToWatch = [
+            (gitDir as NSString).appendingPathComponent("index"),
+            (gitDir as NSString).appendingPathComponent("HEAD"),
+            (gitDir as NSString).appendingPathComponent("FETCH_HEAD"),
+        ]
+
+        for path in filesToWatch {
+            let fd = open(path, O_EVTONLY)
+            guard fd >= 0 else { continue }
+
+            let source = DispatchSource.makeFileSystemObjectSource(
+                fileDescriptor: fd,
+                eventMask: .write,
+                queue: .main
+            )
+            source.setEventHandler { [weak self] in
+                guard let self else { return }
+                MainActor.assumeIsolated { self.scheduleDebounce() }
+            }
+            source.setCancelHandler {
+                close(fd)
+            }
+            source.resume()
+            watchedSources.append(source)
+        }
+
+        startPolling()
+    }
+
+    /// Stop all watchers and cancel background tasks.
+    func stopWatching() {
+        debounceTask?.cancel()
+        debounceTask = nil
+        pollingTask?.cancel()
+        pollingTask = nil
+
+        for source in watchedSources { source.cancel() }
+        watchedSources.removeAll()
+    }
+
+    private func scheduleDebounce() {
+        debounceTask?.cancel()
+        let delay = debounceDelay
+        debounceTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: delay)
+            } catch {
+                return // cancelled
+            }
+            await self?.fetchStatus()
+        }
+    }
+
+    private func startPolling() {
+        let interval = remotePollInterval
+        pollingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: interval)
+                } catch {
+                    return // cancelled
+                }
+                await self?.fetchStatus()
+            }
+        }
     }
 
     // MARK: - Fetch Status

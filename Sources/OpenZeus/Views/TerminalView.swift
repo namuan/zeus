@@ -193,7 +193,7 @@ private struct WindowControlBar: View {
         .background(.bar)
         .overlay(alignment: .trailing) {
             HStack(spacing: 6) {
-                GitControlsView(workingDirectory: workingDirectory, gitExecutablePath: appConfig.git.executablePath)
+                GitControlsView(workingDirectory: workingDirectory, gitConfig: appConfig.git)
                     .id(workingDirectory)
                 Divider().frame(height: 16)
                 windowTabs
@@ -566,8 +566,13 @@ private struct GitControlsView: View {
     @StateObject private var gitService: GitService
     @State private var showRevertConfirmation = false
 
-    init(workingDirectory: String, gitExecutablePath: String = "/usr/bin/git") {
-        _gitService = StateObject(wrappedValue: GitService(workingDirectory: workingDirectory, gitExecutablePath: gitExecutablePath))
+    init(workingDirectory: String, gitConfig: GitConfig = .init()) {
+        _gitService = StateObject(wrappedValue: GitService(
+            workingDirectory: workingDirectory,
+            gitExecutablePath: gitConfig.executablePath,
+            statusDebounceMs: gitConfig.statusDebounceMs,
+            statusPollIntervalSeconds: gitConfig.statusPollIntervalSeconds
+        ))
     }
 
     var body: some View {
@@ -576,6 +581,10 @@ private struct GitControlsView: View {
             .onAppear {
                 logInfo("GitControlsView.onAppear: fetching git status")
                 Task { await gitService.fetchStatus() }
+                gitService.startWatching()
+            }
+            .onDisappear {
+                gitService.stopWatching()
             }
     }
 
