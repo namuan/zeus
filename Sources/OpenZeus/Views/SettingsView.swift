@@ -179,6 +179,34 @@ private struct GitTab: View {
                     Button("Browse…") { browseForExecutable() }
                 }
             }
+
+            Section("Auto-refresh") {
+                LabeledContent("Debounce delay") {
+                    HStack(spacing: 4) {
+                        TextField("", value: $config.statusDebounceMs, format: .number)
+                            .frame(width: 60)
+                            .multilineTextAlignment(.trailing)
+                        Text("ms")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .help("How long to wait after a file-system change before refreshing git status. Lower values feel more responsive but may cause extra git calls during rapid writes.")
+
+                LabeledContent("Remote poll interval") {
+                    HStack(spacing: 4) {
+                        TextField("", value: $config.statusPollIntervalSeconds, format: .number)
+                            .frame(width: 60)
+                            .multilineTextAlignment(.trailing)
+                        Text("s")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .help("How often to poll for remote ahead/behind counts. File-system watching cannot detect remote changes, so this slow poll keeps that info fresh.")
+
+                Text("Local changes (staged, unstaged, untracked) are detected instantly via file-system events. Only remote tracking requires periodic polling.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
     }
