@@ -9,7 +9,6 @@ struct TaskList: View {
     @State private var showingNewTask = false
     @State private var showArchived = false
     @State private var taskToDelete: AgentTask?
-    @State private var worktreeError: String?
 
     private var projectTasks: [AgentTask] {
         let all = appDatabase.tasks(for: project.id)
@@ -82,17 +81,8 @@ struct TaskList: View {
                 project: project,
                 onCreated: projectTasks.isEmpty ? { newTask in
                     selection = newTask
-                } : nil,
-                onWorktreeError: { worktreeError = $0 }
+                } : nil
             )
-        }
-        .alert("Worktree Creation Failed", isPresented: Binding(
-            get: { worktreeError != nil },
-            set: { if !$0 { worktreeError = nil } }
-        )) {
-            Button("OK") { worktreeError = nil }
-        } message: {
-            Text(worktreeError ?? "")
         }
     }
 
@@ -139,12 +129,13 @@ struct NewTaskSheet: View {
     @Environment(\.appConfig) private var appConfig
     let project: Project
     var onCreated: ((AgentTask) -> Void)?
-    var onWorktreeError: ((String) -> Void)?
 
     @State private var taskID = UUID()
     @State private var text = ""
     @State private var createWorktree = false
     @State private var branchNameOverride = ""
+    @State private var isCreatingWorktree = false
+    @State private var worktreeErrorMessage: String?
 
     private static let placeholder = "Task title…\n\nTask description…"
 
@@ -202,13 +193,25 @@ struct NewTaskSheet: View {
                     .frame(maxWidth: .infinity)
             }
 
+            if let errorMessage = worktreeErrorMessage {
+                Text(errorMessage)
+                    .foregroundStyle(.red)
+                    .font(.caption)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             HStack {
                 Button("Discard") { dismiss() }
                     .keyboardShortcut(.cancelAction)
+                    .disabled(isCreatingWorktree)
                 Spacer()
+                if isCreatingWorktree {
+                    ProgressView()
+                        .controlSize(.small)
+                }
                 Button("Save") { save() }
                     .keyboardShortcut(.return, modifiers: .command)
-                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isCreatingWorktree)
             }
         }
         .padding(24)
@@ -220,7 +223,7 @@ struct NewTaskSheet: View {
 
     private func save() {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let task = AgentTask(
+        var task = AgentTask(
             id: taskID,
             projectID: project.id,
             name: derivedTitle.isEmpty ? trimmed : derivedTitle,
@@ -231,35 +234,43 @@ struct NewTaskSheet: View {
             status: .idle
         )
         appDatabase.insertTask(task)
-        dismiss()
-        onCreated?(task)
 
-        if createWorktree {
-            let taskID = task.id
-            let taskName = task.name
-            let repoPath = project.directoryURL.path(percentEncoded: false)
-            let projectSlug = WorktreeService.projectSlug(from: project.name)
-            let worktreeConfig = appConfig.worktree
-            let service = WorktreeService(gitExecutablePath: appConfig.git.executablePath)
-            Task { @MainActor in
-                do {
-                    let result = try await service.createWorktree(
-                        taskID: taskID,
-                        taskName: taskName,
-                        repoPath: repoPath,
-                        projectSlug: projectSlug,
-                        config: worktreeConfig,
-                        branchNameOverride: branchNameOverride.trimmingCharacters(in: .whitespacesAndNewlines)
-                    )
-                    if var updated = appDatabase.task(id: taskID) {
-                        updated.worktreePath = result.path
-                        updated.worktreeBranch = result.branch
-                        appDatabase.updateTask(updated)
-                    }
-                } catch {
-                    print("[WorktreeService] Failed to create worktree: \(error.localizedDescription)")
-                    onWorktreeError?(error.localizedDescription)
+        guard createWorktree else {
+            dismiss()
+            onCreated?(task)
+            return
+        }
+
+        worktreeErrorMessage = nil
+        isCreatingWorktree = true
+        let taskID = task.id
+        let taskName = task.name
+        let repoPath = project.directoryURL.path(percentEncoded: false)
+        let projectSlug = WorktreeService.projectSlug(from: project.name)
+        let worktreeConfig = appConfig.worktree
+        let service = WorktreeService(gitExecutablePath: appConfig.git.executablePath)
+        let branchOverride = branchNameOverride.trimmingCharacters(in: .whitespacesAndNewlines)
+        Task { @MainActor in
+            do {
+                let result = try await service.createWorktree(
+                    taskID: taskID,
+                    taskName: taskName,
+                    repoPath: repoPath,
+                    projectSlug: projectSlug,
+                    config: worktreeConfig,
+                    branchNameOverride: branchOverride
+                )
+                if var updated = appDatabase.task(id: taskID) {
+                    updated.worktreePath = result.path
+                    updated.worktreeBranch = result.branch
+                    appDatabase.updateTask(updated)
+                    task = updated
                 }
+                dismiss()
+                onCreated?(task)
+            } catch {
+                isCreatingWorktree = false
+                worktreeErrorMessage = error.localizedDescription
             }
         }
     }
