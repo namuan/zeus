@@ -1,0 +1,1 @@
+Fix infinite recursion crash when right-clicking or middle-clicking in the terminal. TerminalContainerView was forwarding these events to the SwiftTerm subview which does not implement them, causing NSView default to re-route via nextResponder back to TerminalContainerView in an infinite loop (~25k levels deep, SIGSEGV). Removing the overrides lets AppKit handle routing normally.
