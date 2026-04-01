@@ -1,0 +1,1 @@
+Fixes race condition where terminal opened in main repo directory instead of worktree. Sheet now stays open during async worktree creation, shows a spinner, and surfaces errors inline rather than via a post-dismiss alert.
