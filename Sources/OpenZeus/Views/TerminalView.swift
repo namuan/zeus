@@ -829,9 +829,6 @@ private class TerminalContainerView: NSView {
         didSelectionDrag = true
         subviews.first?.mouseDragged(with: event)
     }
-    override func rightMouseDown(with event: NSEvent) { subviews.first?.rightMouseDown(with: event) }
-    override func rightMouseUp(with event: NSEvent) { subviews.first?.rightMouseUp(with: event) }
-    override func otherMouseDown(with event: NSEvent) { subviews.first?.otherMouseDown(with: event) }
     override func mouseMoved(with event: NSEvent) { subviews.first?.mouseMoved(with: event) }
 
     override func scrollWheel(with event: NSEvent) {
