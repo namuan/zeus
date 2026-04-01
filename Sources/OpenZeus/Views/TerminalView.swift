@@ -565,6 +565,7 @@ private struct TerminalBarCommandEditorPopover: View {
 private struct GitControlsView: View {
     @StateObject private var gitService: GitService
     @State private var showRevertConfirmation = false
+    @State private var showChangesPopover = false
 
     init(workingDirectory: String, gitConfig: GitConfig = .init()) {
         _gitService = StateObject(wrappedValue: GitService(
@@ -625,29 +626,33 @@ private struct GitControlsView: View {
                 }
             }
 
-            if stats.staged > 0 {
-                Text("+\(stats.staged)")
+            if stats.hasChanges {
+                Button { showChangesPopover.toggle() } label: {
+                    HStack(spacing: 4) {
+                        if stats.staged > 0 {
+                            Text("+\(stats.staged)")
+                                .fontWeight(.medium)
+                                .foregroundStyle(.green)
+                        }
+                        if stats.unstaged > 0 {
+                            Text("~\(stats.unstaged)")
+                                .fontWeight(.medium)
+                                .foregroundStyle(.orange)
+                        }
+                        if stats.untracked > 0 {
+                            Text("?\(stats.untracked)")
+                                .fontWeight(.medium)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                     .font(.caption)
-                    .fontWeight(.medium)
-                    .foregroundStyle(.green)
-                    .help("\(stats.staged) staged changes")
-                    .transition(.opacity)
-            }
-            if stats.unstaged > 0 {
-                Text("~\(stats.unstaged)")
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .foregroundStyle(.orange)
-                    .help("\(stats.unstaged) unstaged changes")
-                    .transition(.opacity)
-            }
-            if stats.untracked > 0 {
-                Text("?\(stats.untracked)")
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .foregroundStyle(.secondary)
-                    .help("\(stats.untracked) untracked files")
-                    .transition(.opacity)
+                }
+                .buttonStyle(.plain)
+                .help("Show changed files")
+                .transition(.opacity)
+                .popover(isPresented: $showChangesPopover, arrowEdge: .bottom) {
+                    GitChangesPopover(files: gitService.changedFiles)
+                }
             }
         } else if gitService.isLoading {
             ProgressView()
@@ -672,6 +677,61 @@ private struct GitControlsView: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("This will discard all staged, unstaged, and untracked changes. This cannot be undone.")
+            }
+        }
+    }
+}
+
+private struct GitChangesPopover: View {
+    let files: [GitFileChange]
+
+    private var staged: [GitFileChange] { files.filter { $0.isStaged } }
+    private var unstaged: [GitFileChange] { files.filter { $0.isUnstaged } }
+    private var untracked: [GitFileChange] { files.filter { $0.isUntracked } }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                if !staged.isEmpty {
+                    section(title: "Staged", color: SwiftUI.Color.green, files: staged) { $0.stagedLabel }
+                }
+                if !unstaged.isEmpty {
+                    section(title: "Unstaged", color: SwiftUI.Color.orange, files: unstaged) { $0.unstagedLabel }
+                }
+                if !untracked.isEmpty {
+                    section(title: "Untracked", color: SwiftUI.Color.secondary, files: untracked) { _ in "untracked" }
+                }
+            }
+            .padding(12)
+        }
+        .frame(minWidth: 300, maxWidth: 500, maxHeight: 400)
+    }
+
+    @ViewBuilder
+    private func section(
+        title: String,
+        color: SwiftUI.Color,
+        files: [GitFileChange],
+        label: @escaping (GitFileChange) -> String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(color)
+            ForEach(files) { file in
+                HStack(spacing: 6) {
+                    Text(label(file))
+                        .font(.caption2)
+                        .foregroundStyle(color)
+                        .frame(width: 56, alignment: .leading)
+                    Text(file.path)
+                        .font(.caption)
+                        .fontDesign(.monospaced)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
             }
         }
     }
