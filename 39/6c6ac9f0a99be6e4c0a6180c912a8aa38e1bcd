@@ -1,0 +1,1 @@
+Adds worktree error handling to the task list view. When worktree creation fails during new task creation, the error is now surfaced to the user via an alert dialog instead of being silently logged to console only.
