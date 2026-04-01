@@ -9,6 +9,7 @@ struct TaskList: View {
     @State private var showingNewTask = false
     @State private var showArchived = false
     @State private var taskToDelete: AgentTask?
+    @State private var worktreeError: String?
 
     private var projectTasks: [AgentTask] {
         let all = appDatabase.tasks(for: project.id)
@@ -81,8 +82,17 @@ struct TaskList: View {
                 project: project,
                 onCreated: projectTasks.isEmpty ? { newTask in
                     selection = newTask
-                } : nil
+                } : nil,
+                onWorktreeError: { worktreeError = $0 }
             )
+        }
+        .alert("Worktree Creation Failed", isPresented: Binding(
+            get: { worktreeError != nil },
+            set: { if !$0 { worktreeError = nil } }
+        )) {
+            Button("OK") { worktreeError = nil }
+        } message: {
+            Text(worktreeError ?? "")
         }
     }
 
@@ -129,6 +139,7 @@ struct NewTaskSheet: View {
     @Environment(\.appConfig) private var appConfig
     let project: Project
     var onCreated: ((AgentTask) -> Void)?
+    var onWorktreeError: ((String) -> Void)?
 
     @State private var taskID = UUID()
     @State private var text = ""
@@ -247,6 +258,7 @@ struct NewTaskSheet: View {
                     }
                 } catch {
                     print("[WorktreeService] Failed to create worktree: \(error.localizedDescription)")
+                    onWorktreeError?(error.localizedDescription)
                 }
             }
         }
