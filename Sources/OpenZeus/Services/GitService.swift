@@ -1,5 +1,32 @@
 import Foundation
 
+/// A single file entry from `git status --porcelain=v1`.
+struct GitFileChange: Sendable, Identifiable, Equatable {
+    var id: String { path }
+    let path: String
+    let indexStatus: Character    // column 1: staged
+    let worktreeStatus: Character // column 2: unstaged
+
+    var isStaged: Bool { indexStatus != " " && indexStatus != "?" }
+    var isUnstaged: Bool { worktreeStatus != " " && worktreeStatus != "?" }
+    var isUntracked: Bool { indexStatus == "?" && worktreeStatus == "?" }
+
+    var stagedLabel: String { Self.label(for: indexStatus) }
+    var unstagedLabel: String { Self.label(for: worktreeStatus) }
+
+    private static func label(for char: Character) -> String {
+        switch char {
+        case "M": return "modified"
+        case "A": return "added"
+        case "D": return "deleted"
+        case "R": return "renamed"
+        case "C": return "copied"
+        case "U": return "unmerged"
+        default:  return "changed"
+        }
+    }
+}
+
 /// Git statistics for display in the UI.
 struct GitStats: Sendable, Equatable {
     let staged: Int
@@ -18,6 +45,7 @@ struct GitStats: Sendable, Equatable {
 @MainActor
 final class GitService: ObservableObject {
     @Published var stats: GitStats?
+    @Published var changedFiles: [GitFileChange] = []
     @Published var isLoading = false
     @Published var lastError: String?
 
@@ -126,17 +154,19 @@ final class GitService: ObservableObject {
         lastError = nil
 
         do {
-            let stats = try await computeStats()
+            let (stats, files) = try await computeStats()
             if self.stats != stats { self.stats = stats }
+            if self.changedFiles != files { self.changedFiles = files }
         } catch {
             lastError = error.localizedDescription
             stats = nil
+            changedFiles = []
         }
 
         isLoading = false
     }
 
-    private func computeStats() async throws -> GitStats {
+    private func computeStats() async throws -> (GitStats, [GitFileChange]) {
         // Check if this is a git repo
         let checkResult = await runGit(args: ["rev-parse", "--is-inside-work-tree"])
         guard checkResult.success else {
@@ -149,30 +179,20 @@ final class GitService: ObservableObject {
             throw GitError.commandFailed(statusOutput.output)
         }
 
-        var staged = 0
-        var unstaged = 0
-        var untracked = 0
+        var files: [GitFileChange] = []
 
         for line in statusOutput.output.split(separator: "\n") {
-            guard line.count >= 2 else { continue }
+            guard line.count >= 3 else { continue }
             let indexChar = line[line.startIndex]
             let worktreeChar = line[line.index(after: line.startIndex)]
-
-            // Index status (staged)
-            if indexChar != " " && indexChar != "?" {
-                staged += 1
-            }
-
-            // Worktree status (unstaged)
-            if worktreeChar != " " && worktreeChar != "?" {
-                unstaged += 1
-            }
-
-            // Untracked
-            if indexChar == "?" && worktreeChar == "?" {
-                untracked += 1
-            }
+            let pathStart = line.index(line.startIndex, offsetBy: 3)
+            let path = String(line[pathStart...])
+            files.append(GitFileChange(path: path, indexStatus: indexChar, worktreeStatus: worktreeChar))
         }
+
+        let staged = files.filter { $0.isStaged }.count
+        let unstaged = files.filter { $0.isUnstaged }.count
+        let untracked = files.filter { $0.isUntracked }.count
 
         // Get current branch
         let branchOutput = await runGit(args: ["rev-parse", "--abbrev-ref", "HEAD"])
@@ -198,7 +218,7 @@ final class GitService: ObservableObject {
             }
         }
 
-        return GitStats(
+        return (GitStats(
             staged: staged,
             unstaged: unstaged,
             untracked: untracked,
@@ -206,7 +226,7 @@ final class GitService: ObservableObject {
             hasRemote: hasRemote,
             ahead: ahead,
             behind: behind
-        )
+        ), files)
     }
 
     // MARK: - Git Actions
