@@ -693,10 +693,10 @@ private struct GitChangesPopover: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 if !staged.isEmpty {
-                    section(title: "Staged", color: SwiftUI.Color.green, files: staged) { $0.stagedLabel }
+                    section(title: "Staged", color: SwiftUI.Color.blue, files: staged) { $0.stagedLabel }
                 }
                 if !unstaged.isEmpty {
-                    section(title: "Unstaged", color: SwiftUI.Color.orange, files: unstaged) { $0.unstagedLabel }
+                    section(title: "Unstaged", color: SwiftUI.Color.yellow, files: unstaged) { $0.unstagedLabel }
                 }
                 if !untracked.isEmpty {
                     section(title: "Untracked", color: SwiftUI.Color.secondary, files: untracked) { _ in "untracked" }
