@@ -1,0 +1,1 @@
+Detect active tmux tasks by resolving the deepest foreground descendant under shell-reported panes; adds regression tests for wrapped CLIs.
