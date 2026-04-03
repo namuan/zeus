@@ -12,16 +12,17 @@ struct ProjectList: View {
     var body: some View {
         List {
             ForEach(appDatabase.projects) { project in
-                ProjectRow(
-                    project: project,
-                    activeTask: activeTask,
-                    isSelected: selection == project,
-                    runningTaskCount: runningTaskCount(for: project),
-                    onSelect: { selection = project },
-                    onRemove: { projectToDelete = project },
-                    onOpenInFinder: { openInFinder(project) },
-                    onOpenInTerminal: { openInTerminal(project) }
-                )
+                    ProjectRow(
+                        project: project,
+                        activeTask: activeTask,
+                        isSelected: selection == project,
+                        runningTaskCount: runningTaskCount(for: project),
+                        openTaskCount: openTaskCount(for: project),
+                        onSelect: { selection = project },
+                        onRemove: { projectToDelete = project },
+                        onOpenInFinder: { openInFinder(project) },
+                        onOpenInTerminal: { openInTerminal(project) }
+                    )
             }
             .onDelete(perform: deleteProjects)
         }
@@ -52,6 +53,12 @@ struct ProjectList: View {
     private func runningTaskCount(for project: Project) -> Int {
         appDatabase.tasks(for: project.id)
             .filter { terminalStore.activeProcessTaskIDs.contains($0.id) }
+            .count
+    }
+
+    private func openTaskCount(for project: Project) -> Int {
+        appDatabase.tasks(for: project.id)
+            .filter { !$0.isArchived && $0.status == .idle }
             .count
     }
 
@@ -101,6 +108,7 @@ private struct ProjectRow: View {
     let activeTask: AgentTask?
     let isSelected: Bool
     let runningTaskCount: Int
+    let openTaskCount: Int
     let onSelect: () -> Void
     let onRemove: () -> Void
     let onOpenInFinder: () -> Void
@@ -130,8 +138,14 @@ private struct ProjectRow: View {
 
             Spacer(minLength: 0)
 
-            if runningTaskCount > 0 {
-                runningBadge
+            HStack(spacing: 6) {
+                if openTaskCount > 0 {
+                    openTasksBadge
+                }
+
+                if runningTaskCount > 0 {
+                    runningBadge
+                }
             }
         }
         .padding(.horizontal, 10)
@@ -195,6 +209,25 @@ private struct ProjectRow: View {
         .background {
             Capsule()
                 .fill(Color.green.opacity(0.12))
+        }
+    }
+
+    private var openTasksBadge: some View {
+        HStack(spacing: 3) {
+            Circle()
+                .fill(Color.orange)
+                .frame(width: 5, height: 5)
+
+            Text("\(openTaskCount)")
+                .font(.caption2.monospacedDigit())
+                .fontWeight(.medium)
+                .foregroundStyle(.orange)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background {
+            Capsule()
+                .fill(Color.orange.opacity(0.12))
         }
     }
 
