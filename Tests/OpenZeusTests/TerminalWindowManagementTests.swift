@@ -208,6 +208,78 @@ private func killTmuxSessionSync(_ tmux: String, sessionName: String) {
     #expect(!knownShells.contains("python3"))
 }
 
+@Test func parseActivePaneInfoTest() {
+    let parsed = parseActivePaneInfo("88228 bash\n")
+
+    #expect(parsed == ActivePaneInfo(pid: 88228, command: "bash"))
+}
+
+@Test func deepestLeafDescendantPrefersDeepestForegroundLeafTest() {
+    let snapshots = [
+        ProcessSnapshot(pid: 100, parentPID: 1, stat: "Ss", command: "/bin/zsh -l"),
+        ProcessSnapshot(pid: 200, parentPID: 100, stat: "S+", command: "bash wrapper.sh"),
+        ProcessSnapshot(pid: 300, parentPID: 200, stat: "S+", command: "node /tmp/tool.js"),
+        ProcessSnapshot(pid: 400, parentPID: 300, stat: "S+", command: "/usr/local/bin/kilo"),
+        ProcessSnapshot(pid: 500, parentPID: 300, stat: "S", command: "/usr/local/bin/helper"),
+    ]
+
+    let leaf = deepestLeafDescendant(in: snapshots, rootPID: 100)
+
+    #expect(leaf?.pid == 400)
+    #expect(leaf?.executableName == "kilo")
+}
+
+@Test func resolvedActiveCommandUsesDeepestLeafForShellPaneTest() async {
+    let paneInfo = ActivePaneInfo(pid: 100, command: "bash")
+    let psScript = """
+    #!/bin/sh
+    cat <<'EOF'
+    100 1 Ss /bin/zsh -l
+    200 100 S+ bash wrapper.sh
+    300 200 S+ node /tmp/tool.js
+    400 300 S+ /usr/local/bin/kilo
+    EOF
+    """
+
+    let pgrepScript = """
+    #!/bin/sh
+    case "$2" in
+      100) printf '200\n' ;;
+      200) printf '300\n' ;;
+      300) printf '400\n' ;;
+    esac
+    """
+
+    let temporaryDirectory = FileManager.default.temporaryDirectory
+    let temporaryPSScript = temporaryDirectory
+        .appendingPathComponent("openzeus-ps-\(UUID().uuidString).sh")
+    let temporaryPGrepScript = temporaryDirectory
+        .appendingPathComponent("openzeus-pgrep-\(UUID().uuidString).sh")
+    try? psScript.write(to: temporaryPSScript, atomically: true, encoding: .utf8)
+    try? pgrepScript.write(to: temporaryPGrepScript, atomically: true, encoding: .utf8)
+    try? FileManager.default.setAttributes(
+        [.posixPermissions: 0o755],
+        ofItemAtPath: temporaryPSScript.path
+    )
+    try? FileManager.default.setAttributes(
+        [.posixPermissions: 0o755],
+        ofItemAtPath: temporaryPGrepScript.path
+    )
+    defer {
+        try? FileManager.default.removeItem(at: temporaryPSScript)
+        try? FileManager.default.removeItem(at: temporaryPGrepScript)
+    }
+
+    let command = await resolvedActiveCommand(
+        paneInfo: paneInfo,
+        knownShells: ["bash", "zsh"],
+        psExecutable: temporaryPSScript.path,
+        pgrepExecutable: temporaryPGrepScript.path
+    )
+
+    #expect(command == "kilo")
+}
+
 // MARK: - Run Process Output Tests
 
 @Test func runProcessOutputEchoTest() async {

@@ -112,8 +112,8 @@ final class TerminalEntry: ObservableObject {
         }
         logDebug("checkActiveProcess: using tmux at \(tmux)")
 
-        async let commandFuture = runProcessOutput(tmux, args: [
-            "display-message", "-p", "-t", sessionName, "#{pane_current_command}",
+        async let paneFuture = runProcessOutput(tmux, args: [
+            "display-message", "-p", "-t", sessionName, "#{pane_pid} #{pane_current_command}",
         ])
         async let windowsFuture = runProcessOutput(tmux, args: [
             "list-windows", "-t", sessionName, "-F",
@@ -122,18 +122,28 @@ final class TerminalEntry: ObservableObject {
         async let panesFuture = runProcessOutput(tmux, args: [
             "list-panes", "-t", sessionName,
         ])
-        let (commandOutput, windowsOutput, panesOutput) = await (commandFuture, windowsFuture, panesFuture)
+        let (paneOutput, windowsOutput, panesOutput) = await (paneFuture, windowsFuture, panesFuture)
 
-        logDebug("checkActiveProcess: commandOutput='\(commandOutput)'")
+        logDebug("checkActiveProcess: paneOutput='\(paneOutput)'")
         logDebug("checkActiveProcess: windowsOutput='\(windowsOutput)'")
         logDebug("checkActiveProcess: panesOutput='\(panesOutput)'")
 
-        let command = commandOutput.trimmingCharacters(in: .whitespacesAndNewlines)
-        let wasActive = hasActiveProcess
-        let isActive = !command.isEmpty && !knownShells.contains(command)
+        let paneInfo = parseActivePaneInfo(paneOutput)
+        let command = paneInfo.command
+        let resolvedCommand = await resolvedActiveCommand(
+            paneInfo: paneInfo,
+            knownShells: knownShells
+        )
+        let isActive = resolvedCommand != nil
         let context = "task='\(taskName)' (\(taskID.uuidString)), project='\(projectName)'"
         if command.isEmpty {
             logInfo("checkActiveProcess: \(context) — command empty, badge hidden")
+        } else if let resolvedCommand {
+            if resolvedCommand == command {
+                logInfo("checkActiveProcess: \(context) — command='\(resolvedCommand)', showing Active badge")
+            } else {
+                logInfo("checkActiveProcess: \(context) — command='\(command)', resolved descendant='\(resolvedCommand)', showing Active badge")
+            }
         } else if knownShells.contains(command) {
             logInfo("checkActiveProcess: \(context) — command='\(command)' is a known shell, badge hidden")
         } else {
@@ -395,6 +405,149 @@ final class TerminalEntry: ObservableObject {
         logDebug("createVerticalPane: pane_id='\(paneID)'")
         return paneID.isEmpty ? sessionName : paneID
     }
+}
+
+struct ActivePaneInfo: Equatable {
+    let pid: Int?
+    let command: String
+}
+
+struct ProcessSnapshot: Equatable {
+    let pid: Int
+    let parentPID: Int
+    let stat: String
+    let command: String
+
+    var isForeground: Bool {
+        stat.contains("+")
+    }
+
+    var executableName: String {
+        command
+            .split(separator: " ", maxSplits: 1)
+            .first
+            .map(String.init)
+            .map { token in
+                let normalized = token.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !normalized.isEmpty else { return "" }
+                return URL(fileURLWithPath: normalized).lastPathComponent
+            } ?? ""
+    }
+}
+
+func parseActivePaneInfo(_ output: String) -> ActivePaneInfo {
+    let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else {
+        return ActivePaneInfo(pid: nil, command: "")
+    }
+
+    let parts = trimmed.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true).map(String.init)
+    guard parts.count == 2 else {
+        return ActivePaneInfo(pid: nil, command: trimmed)
+    }
+    return ActivePaneInfo(pid: Int(parts[0]), command: parts[1].trimmingCharacters(in: .whitespacesAndNewlines))
+}
+
+func parseProcessSnapshots(_ output: String) -> [ProcessSnapshot] {
+    output
+        .split(separator: "\n")
+        .compactMap { line in
+            let parts = line.split(separator: " ", maxSplits: 3, omittingEmptySubsequences: true)
+            guard parts.count == 4,
+                  let pid = Int(parts[0]),
+                  let parentPID = Int(parts[1]) else {
+                return nil
+            }
+            return ProcessSnapshot(
+                pid: pid,
+                parentPID: parentPID,
+                stat: String(parts[2]),
+                command: String(parts[3])
+            )
+        }
+}
+
+func deepestLeafDescendant(in snapshots: [ProcessSnapshot], rootPID: Int) -> ProcessSnapshot? {
+    let snapshotsByPID = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.pid, $0) })
+    let childrenByParent = Dictionary(grouping: snapshots, by: \.parentPID)
+
+    guard snapshotsByPID[rootPID] != nil else { return nil }
+
+    var stack: [(pid: Int, depth: Int)] = [(rootPID, 0)]
+    var visited: Set<Int> = []
+    var descendants: [(snapshot: ProcessSnapshot, depth: Int)] = []
+
+    while let current = stack.popLast() {
+        guard visited.insert(current.pid).inserted else { continue }
+        guard let children = childrenByParent[current.pid] else { continue }
+
+        for child in children {
+            descendants.append((child, current.depth + 1))
+            stack.append((child.pid, current.depth + 1))
+        }
+    }
+
+    let descendantPIDs = Set(descendants.map(\.snapshot.pid))
+    let leaves = descendants.filter { candidate in
+        let childPIDs = childrenByParent[candidate.snapshot.pid, default: []].map(\.pid)
+        return childPIDs.allSatisfy { !descendantPIDs.contains($0) }
+    }
+
+    guard !leaves.isEmpty else { return nil }
+
+    let preferredLeaves = leaves.contains(where: { $0.snapshot.isForeground })
+        ? leaves.filter { $0.snapshot.isForeground }
+        : leaves
+
+    return preferredLeaves.max { lhs, rhs in
+        if lhs.depth != rhs.depth {
+            return lhs.depth < rhs.depth
+        }
+        return lhs.snapshot.pid < rhs.snapshot.pid
+    }?.snapshot
+}
+
+nonisolated func resolvedActiveCommand(
+    paneInfo: ActivePaneInfo,
+    knownShells: Set<String>,
+    psExecutable: String = "/bin/ps",
+    pgrepExecutable: String = "/usr/bin/pgrep"
+) async -> String? {
+    let command = paneInfo.command.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !command.isEmpty else { return nil }
+    guard knownShells.contains(command) else { return command }
+    guard let panePID = paneInfo.pid else { return nil }
+
+    let descendantPIDs = await descendantProcessIDs(rootPID: panePID, pgrepExecutable: pgrepExecutable)
+    let pidList = ([panePID] + descendantPIDs).map(String.init).joined(separator: ",")
+    let psOutput = await runProcessOutput(psExecutable, args: ["-o", "pid=,ppid=,stat=,command=", "-p", pidList])
+    let snapshots = parseProcessSnapshots(psOutput)
+    guard let leaf = deepestLeafDescendant(in: snapshots, rootPID: panePID) else {
+        return nil
+    }
+    let leafCommand = leaf.executableName.trimmingCharacters(in: .whitespacesAndNewlines)
+    return leafCommand.isEmpty ? nil : leafCommand
+}
+
+nonisolated func descendantProcessIDs(rootPID: Int, pgrepExecutable: String = "/usr/bin/pgrep") async -> [Int] {
+    var visited: Set<Int> = [rootPID]
+    var queue: [Int] = [rootPID]
+    var descendants: [Int] = []
+
+    while let parentPID = queue.first {
+        queue.removeFirst()
+        let output = await runProcessOutput(pgrepExecutable, args: ["-P", String(parentPID)])
+        let childPIDs = output
+            .split(separator: "\n")
+            .compactMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+
+        for childPID in childPIDs where visited.insert(childPID).inserted {
+            descendants.append(childPID)
+            queue.append(childPID)
+        }
+    }
+
+    return descendants
 }
 
 @discardableResult
