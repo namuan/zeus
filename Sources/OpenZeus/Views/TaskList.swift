@@ -24,6 +24,7 @@ struct TaskList: View {
             ForEach(projectTasks) { task in
                 TaskRow(
                     task: task,
+                    projectName: project.name,
                     isSelected: selection?.id == task.id,
                     onSelect: { selection = task },
                     onArchive: { archiveTask(task) },
@@ -278,6 +279,7 @@ struct NewTaskSheet: View {
 
 private struct TaskRow: View {
     let task: AgentTask
+    let projectName: String
     let isSelected: Bool
     let onSelect: () -> Void
     let onArchive: () -> Void
@@ -320,7 +322,7 @@ private struct TaskRow: View {
                         var updated = task
                         updated.watchMode = task.watchMode.next
                         appDatabase.updateTask(updated)
-                        terminalStore.updateTaskMetadata(taskID: task.id, name: task.name, watchMode: updated.watchMode)
+                        terminalStore.updateTaskMetadata(taskID: task.id, name: task.name, watchMode: updated.watchMode, projectName: projectName)
                     } label: {
                         Image(systemName: task.watchMode.systemImage)
                     }

@@ -54,7 +54,8 @@ struct ContentView: View {
             if let task = selectedTask {
                 TerminalPane(
                     task: task,
-                    projectDirectory: selectedProject?.directoryURL.path(percentEncoded: false) ?? task.workingDirectory.path(percentEncoded: false)
+                    projectDirectory: selectedProject?.directoryURL.path(percentEncoded: false) ?? task.workingDirectory.path(percentEncoded: false),
+                    projectName: selectedProject?.name ?? ""
                 )
             } else if let project = selectedProject {
                 NoTaskDetailPane(project: project)

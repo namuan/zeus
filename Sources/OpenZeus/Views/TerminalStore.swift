@@ -57,6 +57,12 @@ final class TerminalEntry: ObservableObject {
     var projectDirectory: String = "" {
         didSet { logDebug("projectDirectory changed: '\(projectDirectory)'") }
     }
+    var taskName: String = "" {
+        didSet { logDebug("taskName changed: '\(taskName)'") }
+    }
+    var projectName: String = "" {
+        didSet { logDebug("projectName changed: '\(projectName)'") }
+    }
 
     let config: TerminalConfig
     private let delegate: TerminalEntryDelegate
@@ -124,8 +130,16 @@ final class TerminalEntry: ObservableObject {
 
         let command = commandOutput.trimmingCharacters(in: .whitespacesAndNewlines)
         let wasActive = hasActiveProcess
-        hasActiveProcess = !command.isEmpty && !knownShells.contains(command)
-        logDebug("checkActiveProcess: command='\(command)', hasActiveProcess=\(hasActiveProcess) (was \(wasActive))")
+        let isActive = !command.isEmpty && !knownShells.contains(command)
+        let context = "task='\(taskName)' (\(taskID.uuidString)), project='\(projectName)'"
+        if command.isEmpty {
+            logInfo("checkActiveProcess: \(context) — command empty, badge hidden")
+        } else if knownShells.contains(command) {
+            logInfo("checkActiveProcess: \(context) — command='\(command)' is a known shell, badge hidden")
+        } else {
+            logInfo("checkActiveProcess: \(context) — command='\(command)', showing Active badge")
+        }
+        hasActiveProcess = isActive
 
         parseWindowState(windowsOutput)
 
@@ -496,11 +510,15 @@ final class TerminalStore: ObservableObject {
     }
 
     /// Update cached metadata for a task (call when the task's terminal opens or watch mode changes).
-    func updateTaskMetadata(taskID: UUID, name: String, watchMode: WatchMode, workingDirectory: String = "", projectDirectory: String = "") {
-        logInfo("TerminalStore.updateTaskMetadata: task=\(taskID.uuidString), name='\(name)', watchMode=\(watchMode), cwd='\(workingDirectory)', projectDirectory='\(projectDirectory)'")
+    func updateTaskMetadata(taskID: UUID, name: String, watchMode: WatchMode, workingDirectory: String = "", projectDirectory: String = "", projectName: String = "") {
+        logInfo("TerminalStore.updateTaskMetadata: task=\(taskID.uuidString), name='\(name)', watchMode=\(watchMode), cwd='\(workingDirectory)', projectDirectory='\(projectDirectory)', projectName='\(projectName)'")
         taskMetadata[taskID] = (name: name, watchMode: watchMode)
+        entries[taskID]?.taskName = name
         entries[taskID]?.workingDirectory = workingDirectory
         entries[taskID]?.projectDirectory = projectDirectory
+        if !projectName.isEmpty {
+            entries[taskID]?.projectName = projectName
+        }
     }
 
     private func installOptionKeyMonitor() {
