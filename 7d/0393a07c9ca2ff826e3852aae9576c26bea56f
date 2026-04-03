@@ -1,0 +1,9 @@
+feat: log active process detection with task and project context
+
+Add detailed logging to checkActiveProcess() that includes task name,
+project name, the detected tmux command, and the decision outcome
+(show/hide Active badge with reason).
+
+- Add taskName and projectName properties to TerminalEntry
+- Update TerminalStore.updateTaskMetadata() to forward project name
+- Pass project name through TerminalPane and TaskRow call sites
