@@ -1,0 +1,1 @@
+Adds cleanup section to Worktree settings tab. Scans for orphaned tmux sessions (prefix match with no DB task), archived tasks with live worktree dirs, and active tasks with stale worktree paths. Per-item Remove and Remove All buttons. Single-pass task scan, lazy Set construction.
