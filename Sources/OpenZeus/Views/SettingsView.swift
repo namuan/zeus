@@ -21,8 +21,12 @@ struct SettingsView: View {
                 GitTab(config: $config.git)
                     .tabItem { Label("Git", systemImage: "arrow.triangle.branch") }
 
-                WorktreeTab(config: $config.worktree)
-                    .tabItem { Label("Worktree", systemImage: "square.split.2x1") }
+                WorktreeTab(
+                    config: $config.worktree,
+                    terminalConfig: config.terminal,
+                    gitExecutablePath: config.git.executablePath
+                )
+                .tabItem { Label("Worktree", systemImage: "square.split.2x1") }
 
                 InterfaceTab(config: $config.ui)
                     .tabItem { Label("Interface", systemImage: "sidebar.left") }
@@ -228,7 +232,15 @@ private struct GitTab: View {
 // MARK: - Worktree
 
 private struct WorktreeTab: View {
+    @EnvironmentObject private var appDatabase: AppDatabase
     @Binding var config: WorktreeConfig
+    let terminalConfig: TerminalConfig
+    let gitExecutablePath: String
+
+    @State private var cleanupItems: [CleanupItem] = []
+    @State private var isScanning = false
+    @State private var hasScanned = false
+    @State private var removingIDs: Set<UUID> = []
 
     var body: some View {
         Form {
@@ -268,9 +280,92 @@ private struct WorktreeTab: View {
                     }
                 }
             }
+
+            Section {
+                HStack {
+                    Text("Scan for orphaned worktrees and tmux sessions no longer tied to any task.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        Task { await scan() }
+                    } label: {
+                        if isScanning {
+                            HStack(spacing: 6) {
+                                ProgressView().controlSize(.small)
+                                Text("Scanning…")
+                            }
+                        } else {
+                            Label(hasScanned ? "Re-scan" : "Scan", systemImage: "magnifyingglass")
+                        }
+                    }
+                    .disabled(isScanning)
+                }
+
+                if hasScanned {
+                    if cleanupItems.isEmpty {
+                        Label("Nothing to clean up.", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                            .font(.callout)
+                    } else {
+                        ForEach(cleanupItems) { item in
+                            HStack(alignment: .top, spacing: 10) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    HStack(spacing: 6) {
+                                        Text(item.title)
+                                            .font(.callout)
+                                            .fontWeight(.medium)
+                                        Text(item.tagLabel)
+                                            .font(.caption2)
+                                            .fontWeight(.semibold)
+                                            .padding(.horizontal, 5)
+                                            .padding(.vertical, 2)
+                                            .background(item.tagColor.opacity(0.15))
+                                            .foregroundStyle(item.tagColor)
+                                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                                    }
+                                    Text(item.detail)
+                                        .font(.system(.caption, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                    Text(item.reason)
+                                        .font(.caption)
+                                        .foregroundStyle(.tertiary)
+                                }
+                                Spacer()
+                                Button("Remove") {
+                                    Task { await removeItem(item) }
+                                }
+                                .controlSize(.small)
+                                .disabled(removingIDs.contains(item.id))
+                            }
+                            .padding(.vertical, 2)
+                        }
+
+                        HStack {
+                            Text("\(cleanupItems.count) item\(cleanupItems.count == 1 ? "" : "s") found")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Remove All") {
+                                Task {
+                                    for item in cleanupItems { await removeItem(item) }
+                                }
+                            }
+                            .controlSize(.small)
+                            .disabled(!removingIDs.isEmpty)
+                        }
+                    }
+                }
+            } header: {
+                Text("Cleanup")
+            }
         }
         .formStyle(.grouped)
     }
+
+    // MARK: - Browse
 
     private func browseForDirectory() {
         let panel = NSOpenPanel()
@@ -282,6 +377,98 @@ private struct WorktreeTab: View {
         panel.prompt = "Select"
         if panel.runModal() == .OK, let url = panel.url {
             config.basePath = url.path
+        }
+    }
+
+    // MARK: - Scan
+
+    private func scan() async {
+        isScanning = true
+        var found: [CleanupItem] = []
+
+        if let tmux = tmuxExecutable(searchPaths: terminalConfig.tmuxSearchPaths) {
+            let output = await runProcessOutput(tmux, args: ["list-sessions", "-F", "#{session_name}"])
+            let prefix = terminalConfig.tmuxSessionPrefix
+            let knownIDs = Set(appDatabase.tasks.lazy.map { $0.id })
+            for line in output.components(separatedBy: .newlines) {
+                let session = line.trimmingCharacters(in: .whitespaces)
+                guard session.hasPrefix(prefix) else { continue }
+                let uuidString = String(session.dropFirst(prefix.count))
+                guard let uuid = UUID(uuidString: uuidString) else { continue }
+                guard !knownIDs.contains(uuid) else { continue }
+                found.append(CleanupItem(
+                    kind: .orphanedTmuxSession(sessionName: session),
+                    title: "Orphaned tmux session",
+                    detail: session,
+                    reason: "No task with ID \(uuidString.prefix(8))… exists in the database"
+                ))
+            }
+        }
+
+        for task in appDatabase.tasks {
+            guard let path = task.worktreePath else { continue }
+            if task.isArchived {
+                if FileManager.default.fileExists(atPath: path) {
+                    found.append(CleanupItem(
+                        kind: .archivedTaskWithWorktree(task: task),
+                        title: "Archived task with live worktree",
+                        detail: path,
+                        reason: "Task \"\(task.name)\" is archived but its worktree still exists on disk"
+                    ))
+                }
+            } else {
+                if !FileManager.default.fileExists(atPath: path) {
+                    found.append(CleanupItem(
+                        kind: .staleWorktreeReference(task: task),
+                        title: "Stale worktree reference",
+                        detail: path,
+                        reason: "Task \"\(task.name)\" references a worktree path that no longer exists on disk"
+                    ))
+                }
+            }
+        }
+
+        cleanupItems = found
+        isScanning = false
+        hasScanned = true
+    }
+
+    // MARK: - Remove
+
+    private func removeItem(_ item: CleanupItem) async {
+        removingIDs.insert(item.id)
+        defer {
+            removingIDs.remove(item.id)
+            cleanupItems.removeAll { $0.id == item.id }
+        }
+
+        switch item.kind {
+        case .orphanedTmuxSession(let sessionName):
+            if let tmux = tmuxExecutable(searchPaths: terminalConfig.tmuxSearchPaths) {
+                await terminateSessionProcesses(
+                    sessionName: sessionName,
+                    tmux: tmux,
+                    pkillPath: terminalConfig.pkillPath,
+                    sigtermGracePeriodMs: terminalConfig.sigtermGracePeriodMs
+                )
+                await runProcessOutput(tmux, args: ["kill-session", "-t", sessionName])
+            }
+
+        case .archivedTaskWithWorktree(let task):
+            guard let path = task.worktreePath, let branch = task.worktreeBranch else { break }
+            let repoPath = task.workingDirectory.path(percentEncoded: false)
+            let service = WorktreeService(gitExecutablePath: gitExecutablePath)
+            await service.removeWorktree(worktreePath: path, repoPath: repoPath, branchName: branch)
+            var updated = task
+            updated.worktreePath = nil
+            updated.worktreeBranch = nil
+            appDatabase.updateTask(updated)
+
+        case .staleWorktreeReference(let task):
+            var updated = task
+            updated.worktreePath = nil
+            updated.worktreeBranch = nil
+            appDatabase.updateTask(updated)
         }
     }
 }
@@ -408,6 +595,36 @@ private struct LoggingTab: View {
         let url = home.appendingPathComponent(config.logsDirectory)
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         NSWorkspace.shared.open(url)
+    }
+}
+
+// MARK: - Cleanup
+
+private enum CleanupItemKind {
+    case orphanedTmuxSession(sessionName: String)
+    case archivedTaskWithWorktree(task: AgentTask)
+    case staleWorktreeReference(task: AgentTask)
+}
+
+private struct CleanupItem: Identifiable {
+    let id = UUID()
+    let kind: CleanupItemKind
+    let title: String
+    let detail: String
+    let reason: String
+    var tagColor: Color {
+        switch kind {
+        case .orphanedTmuxSession: .red
+        case .archivedTaskWithWorktree: .orange
+        case .staleWorktreeReference: .secondary
+        }
+    }
+    var tagLabel: String {
+        switch kind {
+        case .orphanedTmuxSession: "tmux"
+        case .archivedTaskWithWorktree: "worktree"
+        case .staleWorktreeReference: "stale ref"
+        }
     }
 }
 
