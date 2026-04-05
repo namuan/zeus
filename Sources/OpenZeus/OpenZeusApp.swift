@@ -38,6 +38,8 @@ struct OpenZeusApp: App {
 
         Settings {
             SettingsView()
+                .environmentObject(terminalStore)
+                .environmentObject(appDatabase)
         }
     }
 }
