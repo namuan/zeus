@@ -965,7 +965,7 @@ private func killTmuxSessionSync(_ tmux: String, sessionName: String) {
     // Create TerminalEntry to track windows
     let entry = TerminalEntry(taskID: taskID)
     entry.isRunning = true
-    try? await Task.sleep(nanoseconds: 500_000_000)
+    try? await Task.sleep(nanoseconds: 2_000_000_000)
 
     // Verify one window exists in entry
     #expect(entry.windows.count == 1, "Should start with 1 window")
