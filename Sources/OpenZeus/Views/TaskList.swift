@@ -65,6 +65,10 @@ struct TaskList: View {
                 .buttonStyle(.plain)
             }
         }
+        .focusable()
+        .focusEffectDisabled()
+        .onKeyPress(.upArrow) { navigateTask(by: -1); return .handled }
+        .onKeyPress(.downArrow) { navigateTask(by: 1); return .handled }
         .navigationTitle(project.name)
         .confirmationDialog(
             "Delete \"\(taskToDelete?.name ?? "Task")\"?",
@@ -84,6 +88,16 @@ struct TaskList: View {
                     selection = newTask
                 } : nil
             )
+        }
+    }
+
+    private func navigateTask(by delta: Int) {
+        let tasks = appDatabase.tasks(for: project.id).filter { !$0.isArchived }
+        guard !tasks.isEmpty else { return }
+        if let current = selection, let idx = tasks.firstIndex(where: { $0.id == current.id }) {
+            selection = tasks[max(0, min(tasks.count - 1, idx + delta))]
+        } else {
+            selection = delta > 0 ? tasks.first : tasks.last
         }
     }
 

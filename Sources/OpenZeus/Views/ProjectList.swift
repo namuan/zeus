@@ -26,6 +26,10 @@ struct ProjectList: View {
             }
             .onDelete(perform: deleteProjects)
         }
+        .focusable()
+        .focusEffectDisabled()
+        .onKeyPress(.upArrow) { navigateProject(by: -1); return .handled }
+        .onKeyPress(.downArrow) { navigateProject(by: 1); return .handled }
         .navigationTitle("Projects")
         .toolbar {
             ToolbarItem {
@@ -47,6 +51,16 @@ struct ProjectList: View {
             }
         } message: {
             Text("All tasks for this project will also be deleted. This cannot be undone.")
+        }
+    }
+
+    private func navigateProject(by delta: Int) {
+        let projects = appDatabase.projects
+        guard !projects.isEmpty else { return }
+        if let current = selection, let idx = projects.firstIndex(of: current) {
+            selection = projects[max(0, min(projects.count - 1, idx + delta))]
+        } else {
+            selection = delta > 0 ? projects.first : projects.last
         }
     }
 
