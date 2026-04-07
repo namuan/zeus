@@ -22,14 +22,6 @@ struct ContentView: View {
 
     var body: some View {
         splitView
-            .background {
-                Button("", action: { focusedPanel = .projects })
-                    .keyboardShortcut("1", modifiers: .command)
-                    .accessibilityHidden(true)
-                Button("", action: { focusedPanel = .tasks })
-                    .keyboardShortcut("2", modifiers: .command)
-                    .accessibilityHidden(true)
-            }
             .task {
                 restoreSelection()
                 terminalStore.startPeriodicCleanup(interval: appConfig.terminal.orphanCleanupIntervalSeconds) {
@@ -65,8 +57,10 @@ struct ContentView: View {
     }
 
     private func setupKeyMonitor() {
+        guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            guard event.modifierFlags.intersection([.command, .shift, .option, .control]) == .command else {
+            guard event.charactersIgnoringModifiers == "1" || event.charactersIgnoringModifiers == "2",
+                  event.modifierFlags.intersection([.command, .shift, .option, .control]) == .command else {
                 return event
             }
             switch event.charactersIgnoringModifiers {
