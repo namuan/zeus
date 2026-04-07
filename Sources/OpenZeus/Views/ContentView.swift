@@ -1,5 +1,9 @@
 import SwiftUI
 
+private enum FocusedPanel: Hashable {
+    case projects, tasks
+}
+
 struct ContentView: View {
     @EnvironmentObject var appDatabase: AppDatabase
     @EnvironmentObject var terminalStore: TerminalStore
@@ -7,9 +11,18 @@ struct ContentView: View {
     @State private var selectedProject: Project?
     @State private var selectedTask: AgentTask?
     @AppStorage("lastSelectedProjectID") private var lastSelectedProjectID = ""
+    @FocusState private var focusedPanel: FocusedPanel?
 
     var body: some View {
         splitView
+            .background {
+                Button("", action: { focusedPanel = .projects })
+                    .keyboardShortcut("1", modifiers: .command)
+                    .accessibilityHidden(true)
+                Button("", action: { focusedPanel = .tasks })
+                    .keyboardShortcut("2", modifiers: .command)
+                    .accessibilityHidden(true)
+            }
             .task {
                 restoreSelection()
                 terminalStore.startPeriodicCleanup(interval: appConfig.terminal.orphanCleanupIntervalSeconds) {
@@ -38,6 +51,7 @@ struct ContentView: View {
     private var splitView: some View {
         NavigationSplitView(columnVisibility: .constant(.all)) {
             ProjectList(selection: $selectedProject, activeTask: selectedTask)
+                .focused($focusedPanel, equals: .projects)
                 .navigationSplitViewColumnWidth(
                     min: CGFloat(appConfig.ui.projectListMinWidth),
                     ideal: CGFloat(appConfig.ui.projectListIdealWidth)
@@ -45,6 +59,7 @@ struct ContentView: View {
         } content: {
             if let project = selectedProject {
                 TaskList(project: project, selection: $selectedTask)
+                    .focused($focusedPanel, equals: .tasks)
             } else {
                 ContentUnavailableView("No Project Selected",
                                        systemImage: "folder",
