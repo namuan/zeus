@@ -83,6 +83,10 @@ final class TerminalEntry: ObservableObject {
         terminalView.processDelegate = d
     }
 
+    func focusTerminalView() {
+        terminalView.window?.makeFirstResponder(terminalView)
+    }
+
     private func startPolling() {
         guard pollTimer == nil else {
             logDebug("startPolling: already polling, skipping")
@@ -610,6 +614,8 @@ final class TerminalStore: ObservableObject {
     private let notifier: ActivityNotifier
     nonisolated(unsafe) private var optionKeyMonitor: Any?
     nonisolated(unsafe) private var shiftReturnMonitor: Any?
+    nonisolated(unsafe) private var returnFocusMonitor: Any?
+    nonisolated(unsafe) var selectedTaskID: UUID?
 
     init(config: TerminalConfig = .init(), notificationConfig: NotificationConfig = .init()) {
         self.config = config
@@ -621,6 +627,9 @@ final class TerminalStore: ObservableObject {
             NSEvent.removeMonitor(monitor)
         }
         if let monitor = shiftReturnMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+        if let monitor = returnFocusMonitor {
             NSEvent.removeMonitor(monitor)
         }
         periodicCleanupTask?.cancel()
@@ -635,6 +644,7 @@ final class TerminalStore: ObservableObject {
         logInfo("TerminalStore: creating new TerminalEntry")
         installOptionKeyMonitor()
         installShiftReturnMonitor()
+        installReturnFocusMonitor()
         let entry = TerminalEntry(taskID: id, config: config)
         entries[id] = entry
         entry.$hasActiveProcess
@@ -730,6 +740,26 @@ final class TerminalStore: ObservableObject {
                 }
             }
             return nil // consume the event so SwiftTerm doesn't also send plain \r
+        }
+    }
+
+    private func installReturnFocusMonitor() {
+        guard returnFocusMonitor == nil else { return }
+        logInfo("Installing Return-focus monitor for terminal pane")
+        returnFocusMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            let relevantFlags = event.modifierFlags.intersection([.shift, .option, .command, .control, .function])
+            guard relevantFlags.isEmpty, event.keyCode == 36 || event.keyCode == 76 else { return event }
+            guard let firstResponder = NSApplication.shared.keyWindow?.firstResponder else { return event }
+            guard !(firstResponder is LocalProcessTerminalView) else { return event }
+            guard !(firstResponder is NSTextView) else { return event }
+            guard self?.selectedTaskID != nil else { return event }
+            Task { @MainActor [weak self] in
+                guard let self, let taskID = self.selectedTaskID,
+                      let entry = self.entries[taskID] else { return }
+                logDebug("Return-focus monitor: focusing terminal for task \(taskID.uuidString)")
+                entry.focusTerminalView()
+            }
+            return nil
         }
     }
 

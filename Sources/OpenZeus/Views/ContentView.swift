@@ -32,6 +32,7 @@ struct ContentView: View {
             }
             .onChange(of: selectedTask) { _, newTask in
                 saveTaskSelection(newTask)
+                terminalStore.selectedTaskID = newTask?.id
             }
             .onChange(of: selectedProject) { oldProject, newProject in
                 switchProject(from: oldProject, to: newProject)
