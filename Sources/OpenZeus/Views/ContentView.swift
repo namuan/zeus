@@ -1,7 +1,13 @@
+import AppKit
 import SwiftUI
 
 private enum FocusedPanel: Hashable {
     case projects, tasks
+}
+
+private extension Notification.Name {
+    static let focusProjectsPanel = Notification.Name("OpenZeus.focusProjectsPanel")
+    static let focusTasksPanel = Notification.Name("OpenZeus.focusTasksPanel")
 }
 
 struct ContentView: View {
@@ -12,6 +18,7 @@ struct ContentView: View {
     @State private var selectedTask: AgentTask?
     @AppStorage("lastSelectedProjectID") private var lastSelectedProjectID = ""
     @FocusState private var focusedPanel: FocusedPanel?
+    @State private var keyMonitor: Any?
 
     var body: some View {
         splitView
@@ -47,6 +54,37 @@ struct ContentView: View {
                     selectedProject = projects.first { $0.id == current.id }
                 }
             }
+            .onAppear { setupKeyMonitor() }
+            .onDisappear { tearDownKeyMonitor() }
+            .onReceive(NotificationCenter.default.publisher(for: .focusProjectsPanel)) { _ in
+                focusedPanel = .projects
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .focusTasksPanel)) { _ in
+                focusedPanel = .tasks
+            }
+    }
+
+    private func setupKeyMonitor() {
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard event.modifierFlags.intersection([.command, .shift, .option, .control]) == .command else {
+                return event
+            }
+            switch event.charactersIgnoringModifiers {
+            case "1":
+                NotificationCenter.default.post(name: .focusProjectsPanel, object: nil)
+                return nil
+            case "2":
+                NotificationCenter.default.post(name: .focusTasksPanel, object: nil)
+                return nil
+            default:
+                return event
+            }
+        }
+    }
+
+    private func tearDownKeyMonitor() {
+        if let monitor = keyMonitor { NSEvent.removeMonitor(monitor) }
+        keyMonitor = nil
     }
 
     private var splitView: some View {
