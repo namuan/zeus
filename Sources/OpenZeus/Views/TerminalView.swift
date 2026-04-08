@@ -612,16 +612,12 @@ private struct GitControlsView: View {
 
             if stats.hasRemote {
                 if stats.behind > 0 {
-                    Label("\(stats.behind)", systemImage: "arrow.down")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
+                    statusBadge("\(stats.behind)", systemImage: "arrow.down", color: .orange)
                         .help("\(stats.behind) commits behind remote")
                         .transition(.opacity)
                 }
                 if stats.ahead > 0 {
-                    Label("\(stats.ahead)", systemImage: "arrow.up")
-                        .font(.caption)
-                        .foregroundStyle(.blue)
+                    statusBadge("\(stats.ahead)", systemImage: "arrow.up", color: .blue)
                         .help("\(stats.ahead) commits ahead of remote")
                         .transition(.opacity)
                 }
@@ -631,19 +627,13 @@ private struct GitControlsView: View {
                 Button { showChangesPopover.toggle() } label: {
                     HStack(spacing: 4) {
                         if stats.staged > 0 {
-                            Text("+\(stats.staged)")
-                                .fontWeight(.medium)
-                                .foregroundStyle(.green)
+                            changeCountBadge("+\(stats.staged)", color: .green)
                         }
                         if stats.unstaged > 0 {
-                            Text("~\(stats.unstaged)")
-                                .fontWeight(.medium)
-                                .foregroundStyle(.orange)
+                            changeCountBadge("~\(stats.unstaged)", color: .orange)
                         }
                         if stats.untracked > 0 {
-                            Text("?\(stats.untracked)")
-                                .fontWeight(.medium)
-                                .foregroundStyle(.secondary)
+                            changeCountBadge("?\(stats.untracked)", color: .secondary)
                         }
                     }
                     .font(.caption)
@@ -680,6 +670,30 @@ private struct GitControlsView: View {
                 Text("This will discard all staged, unstaged, and untracked changes. This cannot be undone.")
             }
         }
+    }
+
+    private func changeCountBadge(_ text: String, color: SwiftUI.Color) -> some View {
+        Text(text)
+            .fontWeight(.medium)
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background {
+                Capsule()
+                    .fill(color.opacity(0.18))
+            }
+    }
+
+    private func statusBadge(_ text: String, systemImage: String, color: SwiftUI.Color) -> some View {
+        Label(text, systemImage: systemImage)
+            .font(.caption)
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background {
+                Capsule()
+                    .fill(color.opacity(0.18))
+            }
     }
 }
 
@@ -719,13 +733,19 @@ private struct GitChangesPopover: View {
             Text(title)
                 .font(.caption)
                 .fontWeight(.semibold)
-                .foregroundStyle(color)
+                .foregroundStyle(.primary)
             ForEach(files) { file in
                 HStack(spacing: 6) {
                     Text(label(file))
                         .font(.caption2)
-                        .foregroundStyle(color)
+                        .foregroundStyle(.primary)
                         .frame(width: 56, alignment: .leading)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background {
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(color.opacity(0.18))
+                        }
                     Text(file.path)
                         .font(.caption)
                         .fontDesign(.monospaced)
