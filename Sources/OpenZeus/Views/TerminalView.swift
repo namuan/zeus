@@ -610,17 +610,15 @@ private struct GitControlsView: View {
             .help("Current branch: \(stats.branch)")
             .transition(.opacity)
 
-            if stats.hasRemote {
-                if stats.behind > 0 {
-                    statusBadge("\(stats.behind)", systemImage: "arrow.down", color: .orange)
-                        .help("\(stats.behind) commits behind remote")
-                        .transition(.opacity)
-                }
-                if stats.ahead > 0 {
-                    statusBadge("\(stats.ahead)", systemImage: "arrow.up", color: .blue)
-                        .help("\(stats.ahead) commits ahead of remote")
-                        .transition(.opacity)
-                }
+            if stats.ahead > 0 {
+                statusBadge("\(stats.ahead)", systemImage: "arrow.up", color: .blue)
+                    .help(stats.aheadLabel)
+                    .transition(.opacity)
+            }
+            if stats.hasRemote && stats.behind > 0 {
+                statusBadge("\(stats.behind)", systemImage: "arrow.down", color: .orange)
+                    .help("\(stats.behind) commits behind remote")
+                    .transition(.opacity)
             }
 
             if stats.hasChanges {

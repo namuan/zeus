@@ -39,6 +39,7 @@ struct GitStats: Sendable, Equatable {
 
     var hasChanges: Bool { staged > 0 || unstaged > 0 || untracked > 0 }
     var totalChanges: Int { staged + unstaged + untracked }
+    var aheadLabel: String { "\(ahead) commits ahead of \(hasRemote ? "remote" : "default branch")" }
 }
 
 /// Service for running git commands in a working directory.
@@ -51,6 +52,7 @@ final class GitService: ObservableObject {
 
     private let workingDirectory: String
     private let gitExecutablePath: String
+    private var cachedDefaultBranch: String?
 
     // MARK: - Auto-refresh state
     private var watchedSources: [DispatchSourceFileSystemObject] = []
@@ -216,6 +218,13 @@ final class GitService: ObservableObject {
                     behind = Int(parts[1]) ?? 0
                 }
             }
+        } else {
+            // No upstream set — compare against default branch (origin/HEAD, origin/main, or main)
+            let defaultBranch = await resolveDefaultBranch()
+            let aheadOutput = await runGit(args: ["rev-list", "--count", "\(defaultBranch)..HEAD"])
+            if aheadOutput.success {
+                ahead = Int(aheadOutput.output.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+            }
         }
 
         return (GitStats(
@@ -307,6 +316,33 @@ final class GitService: ObservableObject {
     }
 
     // MARK: - Private Helpers
+
+    /// Returns the best available default branch reference to compare against
+    /// when no upstream is configured. Result is cached since the default branch
+    /// doesn't change during a session.
+    private func resolveDefaultBranch() async -> String {
+        if let cached = cachedDefaultBranch { return cached }
+        let symbolic = await runGit(args: ["symbolic-ref", "refs/remotes/origin/HEAD"])
+        if symbolic.success {
+            let ref = symbolic.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            if ref.hasPrefix("refs/remotes/") {
+                let branch = String(ref.dropFirst("refs/remotes/".count))
+                cachedDefaultBranch = branch
+                return branch
+            }
+        }
+        let branch = await findExistingBranch(from: ["origin/main", "origin/master", "main", "master"]) ?? "main"
+        cachedDefaultBranch = branch
+        return branch
+    }
+
+    private func findExistingBranch(from candidates: [String]) async -> String? {
+        for candidate in candidates {
+            let result = await runGit(args: ["rev-parse", "--verify", candidate])
+            if result.success { return candidate }
+        }
+        return nil
+    }
 
     private func runGit(args: [String]) async -> GitCommandResult {
         await runGitCommand(args: args, in: workingDirectory, executablePath: gitExecutablePath)
