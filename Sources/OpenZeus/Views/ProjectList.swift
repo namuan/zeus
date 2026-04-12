@@ -8,10 +8,20 @@ struct ProjectList: View {
     let activeTask: AgentTask?
 
     @State private var projectToDelete: Project?
+    @State private var searchText = ""
+
+    private var filteredProjects: [Project] {
+        guard !searchText.isEmpty else { return appDatabase.projects }
+        let query = searchText.lowercased()
+        return appDatabase.projects.filter {
+            $0.name.lowercased().contains(query) ||
+            $0.directoryURL.path(percentEncoded: false).lowercased().contains(query)
+        }
+    }
 
     var body: some View {
         List {
-            ForEach(appDatabase.projects) { project in
+            ForEach(filteredProjects) { project in
                     ProjectRow(
                         project: project,
                         activeTask: activeTask,
@@ -31,6 +41,7 @@ struct ProjectList: View {
         .onKeyPress(.upArrow) { navigateProject(by: -1); return .handled }
         .onKeyPress(.downArrow) { navigateProject(by: 1); return .handled }
         .navigationTitle("Projects")
+        .searchable(text: $searchText, placement: .sidebar, prompt: "Search projects")
         .toolbar {
             ToolbarItem {
                 Button(action: addProject) {
@@ -55,7 +66,7 @@ struct ProjectList: View {
     }
 
     private func navigateProject(by delta: Int) {
-        let projects = appDatabase.projects
+        let projects = filteredProjects
         guard !projects.isEmpty else { return }
         if let current = selection, let idx = projects.firstIndex(of: current) {
             selection = projects[max(0, min(projects.count - 1, idx + delta))]
@@ -96,7 +107,7 @@ struct ProjectList: View {
     }
 
     private func deleteProjects(offsets: IndexSet) {
-        for index in offsets { removeProject(appDatabase.projects[index]) }
+        for index in offsets { removeProject(filteredProjects[index]) }
     }
 
     private func openInFinder(_ project: Project) {
