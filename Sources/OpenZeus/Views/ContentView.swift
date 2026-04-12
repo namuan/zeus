@@ -22,6 +22,7 @@ struct ContentView: View {
 
     var body: some View {
         splitView
+            .background(SidebarToggleRemover())
             .task {
                 restoreSelection()
                 terminalStore.startPeriodicCleanup(interval: appConfig.terminal.orphanCleanupIntervalSeconds) {
@@ -113,6 +114,7 @@ struct ContentView: View {
                                        description: Text("Select a task to open its terminal."))
             }
         }
+        .toolbar(removing: .sidebarToggle)
     }
 
     // MARK: - Per-project task memory
@@ -152,4 +154,27 @@ struct ContentView: View {
             selectedTask = task
         }
     }
+}
+
+// NavigationSplitView injects a sidebar-toggle item at the AppKit NSToolbar level that
+// SwiftUI's .toolbar(removing:) alone doesn't reach — this helper removes it directly.
+private struct SidebarToggleRemover: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        Task { @MainActor in
+            // The window isn't attached when makeNSView fires; retry until it is.
+            for _ in 0..<20 {
+                if let toolbar = view.window?.toolbar {
+                    for (idx, item) in toolbar.items.enumerated().reversed() where item.itemIdentifier == .toggleSidebar {
+                        toolbar.removeItem(at: idx)
+                    }
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 10_000_000) // 10 ms
+            }
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }
