@@ -1,0 +1,1 @@
+Cache GitService per working directory in TerminalStore so navigating back to a project shows cached git stats immediately instead of re-spinning. Also fixes orphaned polling task bug in startWatching() and trailing-slash path normalization in Project/Task DB loaders.
