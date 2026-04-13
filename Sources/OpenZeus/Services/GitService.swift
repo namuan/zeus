@@ -92,7 +92,7 @@ final class GitService: ObservableObject {
     /// Start watching `.git` index/HEAD/FETCH_HEAD for local changes and
     /// polling every 30 s for remote-tracking updates.
     func startWatching() {
-        guard watchedSources.isEmpty else { return }
+        guard watchedSources.isEmpty && pollingTask == nil else { return }
 
         let gitDir = (workingDirectory as NSString).appendingPathComponent(".git")
         let filesToWatch = [
