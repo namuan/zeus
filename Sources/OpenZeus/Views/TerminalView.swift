@@ -578,16 +578,35 @@ private struct GitControlsView: View {
     }
 
     var body: some View {
-        gitButtons
-            .animation(.easeInOut(duration: 0.2), value: gitService.stats)
-            .onAppear {
-                logInfo("GitControlsView.onAppear: fetching git status")
-                Task { await gitService.fetchStatus() }
-                gitService.startWatching()
-            }
-            .onDisappear {
-                gitService.stopWatching()
-            }
+        HStack(spacing: 3) {
+            gitButtons
+        }
+        .animation(.easeInOut(duration: 0.2), value: gitService.stats)
+        .onAppear {
+            logInfo("GitControlsView.onAppear: fetching git status")
+            Task { await gitService.fetchStatus() }
+            gitService.startWatching()
+        }
+        .onDisappear {
+            gitService.stopWatching()
+        }
+        .popover(isPresented: $showChangesPopover, arrowEdge: .bottom) {
+            GitChangesPopover(
+                files: gitService.changedFiles,
+                unpushedFiles: gitService.unpushedFiles,
+                fetchDiff: { path, staged, untracked, unpushed in
+                    await gitService.fetchDiff(path: path, staged: staged, untracked: untracked, unpushed: unpushed)
+                },
+                revertFile: { path, kind in
+                    switch kind {
+                    case .staged:   _ = await gitService.unstageFile(path: path)
+                    case .unstaged: _ = await gitService.discardFileChanges(path: path)
+                    case .untracked: _ = await gitService.removeUntrackedFile(path: path)
+                    case .unpushed: break
+                    }
+                }
+            )
+        }
     }
 
     @ViewBuilder
@@ -611,9 +630,12 @@ private struct GitControlsView: View {
             .transition(.opacity)
 
             if stats.ahead > 0 {
-                statusBadge("\(stats.ahead)", systemImage: "arrow.up", color: .blue)
-                    .help(stats.aheadLabel)
-                    .transition(.opacity)
+                Button { showChangesPopover.toggle() } label: {
+                    statusBadge("\(stats.ahead)", systemImage: "arrow.up", color: .blue)
+                }
+                .buttonStyle(.plain)
+                .help(stats.aheadLabel)
+                .transition(.opacity)
             }
             if stats.hasRemote && stats.behind > 0 {
                 statusBadge("\(stats.behind)", systemImage: "arrow.down", color: .orange)
@@ -639,11 +661,6 @@ private struct GitControlsView: View {
                 .buttonStyle(.plain)
                 .help("Show changed files")
                 .transition(.opacity)
-                .popover(isPresented: $showChangesPopover, arrowEdge: .bottom) {
-                    GitChangesPopover(files: gitService.changedFiles) { path, staged, untracked in
-                        await gitService.fetchDiff(path: path, staged: staged, untracked: untracked)
-                    }
-                }
             }
         } else if gitService.isLoading {
             ProgressView()
@@ -697,11 +714,13 @@ private struct GitControlsView: View {
     }
 }
 
-private enum DiffKind { case staged, unstaged, untracked }
+private enum DiffKind { case staged, unstaged, untracked, unpushed }
 
 private struct GitChangesPopover: View {
     let files: [GitFileChange]
-    let fetchDiff: (String, Bool, Bool) async -> String
+    let unpushedFiles: [GitFileChange]
+    let fetchDiff: (String, Bool, Bool, Bool) async -> String
+    let revertFile: (String, DiffKind) async -> Void
 
     private var staged: [GitFileChange] { files.filter { $0.isStaged } }
     private var unstaged: [GitFileChange] { files.filter { $0.isUnstaged } }
@@ -712,27 +731,96 @@ private struct GitChangesPopover: View {
     @State private var loadingFiles: Set<String> = []
     @State private var diffs: [String: String] = [:]
     @State private var diffTasks: [String: Task<Void, Never>] = [:]
+    @State private var pendingRevert: (file: GitFileChange, kind: DiffKind)?
+
+    private var allKeys: [String] {
+        staged.map { diffKey($0.path, .staged) } +
+        unstaged.map { diffKey($0.path, .unstaged) } +
+        untracked.map { diffKey($0.path, .untracked) } +
+        unpushedFiles.map { diffKey($0.path, .unpushed) }
+    }
+
+    private var allCollapsed: Bool {
+        let keys = allKeys
+        return !keys.isEmpty && keys.allSatisfy { collapsedFiles.contains($0) }
+    }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                if !staged.isEmpty {
-                    section(title: "Staged", color: .blue, files: staged, kind: .staged) { $0.stagedLabel }
+        VStack(spacing: 0) {
+            // Toolbar
+            HStack {
+                Spacer()
+                Button {
+                    if allCollapsed {
+                        collapsedFiles.removeAll()
+                    } else {
+                        collapsedFiles.formUnion(allKeys)
+                    }
+                } label: {
+                    Label(
+                        allCollapsed ? "Expand All" : "Collapse All",
+                        systemImage: allCollapsed ? "chevron.down.2" : "chevron.up.2"
+                    )
+                    .font(.caption)
                 }
-                if !unstaged.isEmpty {
-                    section(title: "Unstaged", color: .yellow, files: unstaged, kind: .unstaged) { $0.unstagedLabel }
-                }
-                if !untracked.isEmpty {
-                    section(title: "Untracked", color: .secondary, files: untracked, kind: .untracked) { _ in "untracked" }
-                }
+                .buttonStyle(.borderless)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
             }
-            .padding(14)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    if !staged.isEmpty {
+                        section(title: "Staged", color: .blue, files: staged, kind: .staged) { $0.stagedLabel }
+                    }
+                    if !unstaged.isEmpty {
+                        section(title: "Unstaged", color: .yellow, files: unstaged, kind: .unstaged) { $0.unstagedLabel }
+                    }
+                    if !untracked.isEmpty {
+                        section(title: "Untracked", color: .secondary, files: untracked, kind: .untracked) { _ in "untracked" }
+                    }
+                    if !unpushedFiles.isEmpty {
+                        section(title: "Not Pushed", color: .purple, files: unpushedFiles, kind: .unpushed) { $0.stagedLabel }
+                    }
+                }
+                .padding(14)
+            }
         }
         .frame(minWidth: 600, idealWidth: 750, maxWidth: 1100, minHeight: 400, idealHeight: 700, maxHeight: 1000)
         .onAppear { fetchAllDiffs() }
         .onDisappear {
             diffTasks.values.forEach { $0.cancel() }
             diffTasks.removeAll()
+        }
+        .confirmationDialog(
+            pendingRevert.map { confirmationStrings(for: $0.kind).title } ?? "Confirm",
+            isPresented: Binding(
+                get: { pendingRevert != nil },
+                set: { if !$0 { pendingRevert = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let pending = pendingRevert {
+                Button(confirmationStrings(for: pending.kind).action, role: .destructive) {
+                    Task {
+                        await revertFile(pending.file.path, pending.kind)
+                        pendingRevert = nil
+                    }
+                }
+                Button("Cancel", role: .cancel) { pendingRevert = nil }
+            }
+        } message: {
+            if let pending = pendingRevert {
+                Text(pending.file.path)
+            }
+        }
+    }
+
+    private func confirmationStrings(for kind: DiffKind) -> (title: String, action: String) {
+        switch kind {
+        case .unstaged: return ("Discard changes?", "Discard Changes")
+        case .untracked: return ("Delete file?", "Delete File")
+        default: return ("Confirm", "Confirm")
         }
     }
 
@@ -755,17 +843,56 @@ private struct GitChangesPopover: View {
         }
     }
 
+    /// Returns the dictionary key used for `diffs`, `loadingFiles`, and `diffTasks`.
+    /// Unpushed entries use a prefixed key to avoid collision with working-tree entries
+    /// for the same path.
+    private func diffKey(_ path: String, _ kind: DiffKind) -> String {
+        kind == .unpushed ? "unpushed:\(path)" : path
+    }
+
+    @ViewBuilder
+    private func iconButton(systemName: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
+    @ViewBuilder
+    private func revertButton(file: GitFileChange, kind: DiffKind) -> some View {
+        switch kind {
+        case .staged:
+            iconButton(systemName: "minus.circle", help: "Unstage file") {
+                Task { await revertFile(file.path, kind) }
+            }
+        case .unstaged:
+            iconButton(systemName: "arrow.uturn.backward.circle", help: "Discard changes") {
+                pendingRevert = (file, kind)
+            }
+        case .untracked:
+            iconButton(systemName: "trash", help: "Delete file") {
+                pendingRevert = (file, kind)
+            }
+        case .unpushed:
+            EmptyView()
+        }
+    }
+
     @ViewBuilder
     private func fileRow(file: GitFileChange, color: SwiftUI.Color, kind: DiffKind, label: String) -> some View {
-        let isCollapsed = collapsedFiles.contains(file.path)
-        let isLoading   = loadingFiles.contains(file.path)
+        let key         = diffKey(file.path, kind)
+        let isCollapsed = collapsedFiles.contains(key)
+        let isLoading   = loadingFiles.contains(key)
 
         VStack(alignment: .leading, spacing: 4) {
             Button {
                 if isCollapsed {
-                    collapsedFiles.remove(file.path)
+                    collapsedFiles.remove(key)
                 } else {
-                    collapsedFiles.insert(file.path)
+                    collapsedFiles.insert(key)
                 }
             } label: {
                 HStack(spacing: 6) {
@@ -789,6 +916,8 @@ private struct GitChangesPopover: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer()
+                    revertButton(file: file, kind: kind)
+                        .padding(.trailing, 4)
                 }
             }
             .buttonStyle(.plain)
@@ -803,7 +932,7 @@ private struct GitChangesPopover: View {
                     }
                     .padding(.leading, 14)
                     .padding(.vertical, 4)
-                } else if let diff = diffs[file.path] {
+                } else if let diff = diffs[key] {
                     if diff.isEmpty {
                         Text("No diff available")
                             .font(.caption2)
@@ -823,16 +952,24 @@ private struct GitChangesPopover: View {
         let work: [(path: String, kind: DiffKind)] =
             staged.map { ($0.path, .staged) } +
             unstaged.map { ($0.path, .unstaged) } +
-            untracked.map { ($0.path, .untracked) }
+            untracked.map { ($0.path, .untracked) } +
+            unpushedFiles.map { ($0.path, .unpushed) }
 
-        for item in work where diffs[item.path] == nil && diffTasks[item.path] == nil {
-            loadingFiles.insert(item.path)
-            diffTasks[item.path] = Task {
-                let diff = await fetchDiff(item.path, item.kind == .staged, item.kind == .untracked)
+        for item in work {
+            let key = diffKey(item.path, item.kind)
+            guard diffs[key] == nil && diffTasks[key] == nil else { continue }
+            loadingFiles.insert(key)
+            diffTasks[key] = Task {
+                let diff = await fetchDiff(
+                    item.path,
+                    item.kind == .staged,
+                    item.kind == .untracked,
+                    item.kind == .unpushed
+                )
                 guard !Task.isCancelled else { return }
-                diffs[item.path] = diff
-                loadingFiles.remove(item.path)
-                diffTasks.removeValue(forKey: item.path)
+                diffs[key] = diff
+                loadingFiles.remove(key)
+                diffTasks.removeValue(forKey: key)
             }
         }
     }
