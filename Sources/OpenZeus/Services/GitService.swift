@@ -42,11 +42,18 @@ struct GitStats: Sendable, Equatable {
     var aheadLabel: String { "\(ahead) commits ahead of \(hasRemote ? "remote" : "default branch")" }
 }
 
+private struct StatsSnapshot {
+    let stats: GitStats
+    let changedFiles: [GitFileChange]
+    let unpushedFiles: [GitFileChange]
+}
+
 /// Service for running git commands in a working directory.
 @MainActor
 final class GitService: ObservableObject {
     @Published var stats: GitStats?
     @Published var changedFiles: [GitFileChange] = []
+    @Published var unpushedFiles: [GitFileChange] = []
     @Published var isLoading = false
     @Published var lastError: String?
 
@@ -57,6 +64,8 @@ final class GitService: ObservableObject {
     /// as its path root. Required so that `git diff -- <path>` resolves paths correctly
     /// when `workingDirectory` is a subdirectory of the actual repo root.
     private var cachedRepoTopLevel: String?
+    /// Cached upstream ref (e.g. `@{u}` or `origin/main`) used by `fetchDiff(unpushed:)`.
+    private var cachedUpstreamRef: String?
 
     // MARK: - Auto-refresh state
     private var watchedSources: [DispatchSourceFileSystemObject] = []
@@ -160,27 +169,33 @@ final class GitService: ObservableObject {
         lastError = nil
 
         do {
-            let (stats, files) = try await computeStats()
-            if self.stats != stats { self.stats = stats }
-            if self.changedFiles != files { self.changedFiles = files }
+            let snapshot = try await computeStats()
+            if self.stats != snapshot.stats { self.stats = snapshot.stats }
+            if self.changedFiles != snapshot.changedFiles { self.changedFiles = snapshot.changedFiles }
+            if self.unpushedFiles != snapshot.unpushedFiles { self.unpushedFiles = snapshot.unpushedFiles }
         } catch {
             lastError = error.localizedDescription
             stats = nil
             changedFiles = []
+            unpushedFiles = []
         }
 
         isLoading = false
     }
 
-    private func computeStats() async throws -> (GitStats, [GitFileChange]) {
+    private func computeStats() async throws -> StatsSnapshot {
         // Check if this is a git repo
         let checkResult = await runGit(args: ["rev-parse", "--is-inside-work-tree"])
         guard checkResult.success else {
             throw GitError.notARepo
         }
 
-        // Get porcelain status
-        let statusOutput = await runGit(args: ["status", "--porcelain=v1"])
+        // Status, branch, and remote check are independent — run in parallel.
+        async let statusFetch = runGit(args: ["status", "--porcelain=v1"])
+        async let branchFetch = runGit(args: ["rev-parse", "--abbrev-ref", "HEAD"])
+        async let remoteFetch = runGit(args: ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])
+        let (statusOutput, branchOutput, remoteOutput) = await (statusFetch, branchFetch, remoteFetch)
+
         guard statusOutput.success else {
             throw GitError.commandFailed(statusOutput.output)
         }
@@ -200,13 +215,17 @@ final class GitService: ObservableObject {
         let unstaged = files.filter { $0.isUnstaged }.count
         let untracked = files.filter { $0.isUntracked }.count
 
-        // Get current branch
-        let branchOutput = await runGit(args: ["rev-parse", "--abbrev-ref", "HEAD"])
         let branch = branchOutput.success ? branchOutput.output.trimmingCharacters(in: .whitespacesAndNewlines) : "unknown"
-
-        // Check for remote
-        let remoteOutput = await runGit(args: ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])
         let hasRemote = remoteOutput.success
+
+        // Resolve upstream ref and cache it for use by fetchDiff(unpushed:)
+        let upstreamRef: String
+        if hasRemote {
+            upstreamRef = "@{u}"
+        } else {
+            upstreamRef = await resolveDefaultBranch()
+        }
+        cachedUpstreamRef = upstreamRef
 
         // Get ahead/behind counts
         var ahead = 0
@@ -223,26 +242,63 @@ final class GitService: ObservableObject {
                 }
             }
         } else {
-            // No upstream set — compare against default branch (origin/HEAD, origin/main, or main)
-            let defaultBranch = await resolveDefaultBranch()
-            let aheadOutput = await runGit(args: ["rev-list", "--count", "\(defaultBranch)..HEAD"])
+            let aheadOutput = await runGit(args: ["rev-list", "--count", "\(upstreamRef)..HEAD"])
             if aheadOutput.success {
                 ahead = Int(aheadOutput.output.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
             }
         }
 
-        return (GitStats(
-            staged: staged,
-            unstaged: unstaged,
-            untracked: untracked,
-            branch: branch,
-            hasRemote: hasRemote,
-            ahead: ahead,
-            behind: behind
-        ), files)
+        // Fetch the list of files changed in commits that haven't been pushed yet.
+        var unpushedFilesList: [GitFileChange] = []
+        if ahead > 0 {
+            let nameStatus = await runGit(args: ["diff", "--name-status", "\(upstreamRef)..HEAD"])
+            if nameStatus.success {
+                for line in nameStatus.output.split(separator: "\n") {
+                    let parts = line.split(separator: "\t", maxSplits: 1)
+                    guard parts.count >= 2, let statusChar = parts[0].first else { continue }
+                    let path = String(parts[1])
+                    unpushedFilesList.append(GitFileChange(path: path, indexStatus: statusChar, worktreeStatus: " "))
+                }
+            }
+        }
+
+        return StatsSnapshot(
+            stats: GitStats(
+                staged: staged,
+                unstaged: unstaged,
+                untracked: untracked,
+                branch: branch,
+                hasRemote: hasRemote,
+                ahead: ahead,
+                behind: behind
+            ),
+            changedFiles: files,
+            unpushedFiles: unpushedFilesList
+        )
     }
 
     // MARK: - Git Actions
+
+    /// Unstage a single file (git reset HEAD -- <path>)
+    func unstageFile(path: String) async -> GitCommandResult {
+        let result = await runGitFromTopLevel(args: ["reset", "HEAD", "--", path])
+        await fetchStatus()
+        return result
+    }
+
+    /// Discard unstaged changes for a single file (git checkout -- <path>)
+    func discardFileChanges(path: String) async -> GitCommandResult {
+        let result = await runGitFromTopLevel(args: ["checkout", "--", path])
+        await fetchStatus()
+        return result
+    }
+
+    /// Remove a single untracked file (git clean -f -- <path>)
+    func removeUntrackedFile(path: String) async -> GitCommandResult {
+        let result = await runGitFromTopLevel(args: ["clean", "-f", "--", path])
+        await fetchStatus()
+        return result
+    }
 
     /// Stage all changes (git add .)
     func stageAll() async -> GitCommandResult {
@@ -300,17 +356,21 @@ final class GitService: ObservableObject {
     }
 
     /// Returns the unified diff for a single file.
+    /// - `unpushed: true` → `git diff <upstream>..HEAD -- path`
     /// - `staged: true`   → `git diff --cached -- path`
     /// - `untracked: true` → `git diff --no-index /dev/null path` (exit 1 is normal when diff exists)
     /// - otherwise        → `git diff -- path`
-    func fetchDiff(path: String, staged: Bool, untracked: Bool) async -> String {
+    func fetchDiff(path: String, staged: Bool, untracked: Bool, unpushed: Bool = false) async -> String {
         // `git status --porcelain` always emits paths relative to the repo root, regardless
         // of CWD.  `git diff -- <path>` resolves paths relative to CWD.  If the project's
         // working directory is a subdirectory of the repo, those two bases diverge and diff
         // silently returns nothing (exit 0, empty output).  Always run diff from the toplevel.
         let topLevel = await repoTopLevel()
         let args: [String]
-        if untracked {
+        if unpushed {
+            let ref = cachedUpstreamRef ?? "@{u}"
+            args = ["--no-pager", "diff", "--no-color", "\(ref)..HEAD", "--", path]
+        } else if untracked {
             args = ["--no-pager", "diff", "--no-color", "--no-index", "/dev/null", path]
         } else if staged {
             args = ["--no-pager", "diff", "--no-color", "--cached", "--", path]
@@ -386,6 +446,12 @@ final class GitService: ObservableObject {
 
     private func runGit(args: [String]) async -> GitCommandResult {
         await runGitCommand(args: args, in: workingDirectory, executablePath: gitExecutablePath)
+    }
+
+    /// Like `runGit`, but runs from the repo toplevel so that porcelain paths resolve correctly
+    /// when `workingDirectory` is a subdirectory of the actual repo root.
+    private func runGitFromTopLevel(args: [String]) async -> GitCommandResult {
+        await runGitCommand(args: args, in: await repoTopLevel(), executablePath: gitExecutablePath)
     }
 }
 
