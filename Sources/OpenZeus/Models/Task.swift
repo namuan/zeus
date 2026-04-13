@@ -36,7 +36,9 @@ extension AgentTask: FetchableRecord {
         command = row["command"]
         let envString: String = row["environment"]
         environment = (try? JSONDecoder().decode([String: String].self, from: Data(envString.utf8))) ?? [:]
-        workingDirectory = URL(fileURLWithPath: row["workingDirectory"] as String)
+        var rawWorkingDirectory = row["workingDirectory"] as String
+        if rawWorkingDirectory.hasSuffix("/") { rawWorkingDirectory = String(rawWorkingDirectory.dropLast()) }
+        workingDirectory = URL(fileURLWithPath: rawWorkingDirectory)
         status = AgentStatus(rawValue: row["status"]) ?? .idle
         if let tsString: String = row["terminalState"],
            let data = tsString.data(using: .utf8) {

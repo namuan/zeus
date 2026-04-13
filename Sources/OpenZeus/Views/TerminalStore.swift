@@ -604,6 +604,7 @@ private final class TerminalEntryDelegate: NSObject, LocalProcessTerminalViewDel
 @MainActor
 final class TerminalStore: ObservableObject {
     private var entries: [UUID: TerminalEntry] = [:]
+    private var gitServices: [String: GitService] = [:]
     @Published private(set) var activeProcessTaskIDs: Set<UUID> = []
     @Published private(set) var attentionTaskIDs: Set<UUID> = []
     private var cancellables: Set<AnyCancellable> = []
@@ -682,6 +683,28 @@ final class TerminalStore: ObservableObject {
         if !projectName.isEmpty {
             entries[taskID]?.projectName = projectName
         }
+    }
+
+    /// Returns the shared `GitService` for the given working directory, creating one on first call.
+    /// The service is cached for the lifetime of `TerminalStore` so that git stats survive
+    /// navigation — the caller never sees a stale-nil state on re-visit.
+    func gitService(for workingDirectory: String, config: GitConfig) -> GitService {
+        if let existing = gitServices[workingDirectory] { return existing }
+        let service = GitService(
+            workingDirectory: workingDirectory,
+            gitExecutablePath: config.executablePath,
+            statusDebounceMs: config.statusDebounceMs,
+            statusPollIntervalSeconds: config.statusPollIntervalSeconds
+        )
+        gitServices[workingDirectory] = service
+        return service
+    }
+
+    /// Stops and removes the cached `GitService` for a working directory.
+    /// Call when a project is deleted to release file watchers and background tasks.
+    func removeGitService(for workingDirectory: String) {
+        gitServices[workingDirectory]?.stopWatching()
+        gitServices.removeValue(forKey: workingDirectory)
     }
 
     private func installOptionKeyMonitor() {

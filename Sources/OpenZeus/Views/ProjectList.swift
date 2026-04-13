@@ -103,6 +103,7 @@ struct ProjectList: View {
         for task in appDatabase.tasks(for: project.id) {
             terminalStore.killSession(for: task.id)
         }
+        terminalStore.removeGitService(for: project.directoryURL.path(percentEncoded: false))
         appDatabase.deleteProject(id: project.id)
     }
 

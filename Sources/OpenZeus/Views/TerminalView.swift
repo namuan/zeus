@@ -167,6 +167,7 @@ private struct WindowControlBar: View {
     let workingDirectory: String
     @Binding var terminalVisible: Bool
     @EnvironmentObject var db: AppDatabase
+    @EnvironmentObject var terminalStore: TerminalStore
     @Environment(\.appConfig) private var appConfig
     @State private var showCommands = false
     @State private var terminalBarCommandEditor: TerminalBarCommandEditorState?
@@ -194,7 +195,7 @@ private struct WindowControlBar: View {
         .background(.bar)
         .overlay(alignment: .trailing) {
             HStack(spacing: 6) {
-                GitControlsView(workingDirectory: workingDirectory, gitConfig: appConfig.git)
+                GitControlsView(gitService: terminalStore.gitService(for: workingDirectory, config: appConfig.git))
                     .id(workingDirectory)
                 Divider().frame(height: 16)
                 windowTabs
@@ -564,18 +565,9 @@ private struct TerminalBarCommandEditorPopover: View {
 // MARK: - Git controls (shared)
 
 private struct GitControlsView: View {
-    @StateObject private var gitService: GitService
+    @ObservedObject var gitService: GitService
     @State private var showRevertConfirmation = false
     @State private var showChangesPopover = false
-
-    init(workingDirectory: String, gitConfig: GitConfig = .init()) {
-        _gitService = StateObject(wrappedValue: GitService(
-            workingDirectory: workingDirectory,
-            gitExecutablePath: gitConfig.executablePath,
-            statusDebounceMs: gitConfig.statusDebounceMs,
-            statusPollIntervalSeconds: gitConfig.statusPollIntervalSeconds
-        ))
-    }
 
     var body: some View {
         HStack(spacing: 3) {

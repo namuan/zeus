@@ -20,7 +20,9 @@ extension Project: FetchableRecord {
     init(row: Row) throws {
         id = UUID(uuidString: row["id"]) ?? UUID()
         name = row["name"]
-        directoryURL = URL(fileURLWithPath: row["directoryURL"] as String)
+        var rawPath = row["directoryURL"] as String
+        if rawPath.hasSuffix("/") { rawPath = String(rawPath.dropLast()) }
+        directoryURL = URL(fileURLWithPath: rawPath)
         isDeleted = (row["isDeleted"] as? Int64 ?? 0) != 0
     }
 }
