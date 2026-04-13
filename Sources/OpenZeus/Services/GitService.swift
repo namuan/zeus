@@ -53,6 +53,10 @@ final class GitService: ObservableObject {
     private let workingDirectory: String
     private let gitExecutablePath: String
     private var cachedDefaultBranch: String?
+    /// Lazily-resolved repo toplevel — the directory `git status --porcelain` uses
+    /// as its path root. Required so that `git diff -- <path>` resolves paths correctly
+    /// when `workingDirectory` is a subdirectory of the actual repo root.
+    private var cachedRepoTopLevel: String?
 
     // MARK: - Auto-refresh state
     private var watchedSources: [DispatchSourceFileSystemObject] = []
@@ -295,6 +299,42 @@ final class GitService: ObservableObject {
         return result
     }
 
+    /// Returns the unified diff for a single file.
+    /// - `staged: true`   → `git diff --cached -- path`
+    /// - `untracked: true` → `git diff --no-index /dev/null path` (exit 1 is normal when diff exists)
+    /// - otherwise        → `git diff -- path`
+    func fetchDiff(path: String, staged: Bool, untracked: Bool) async -> String {
+        // `git status --porcelain` always emits paths relative to the repo root, regardless
+        // of CWD.  `git diff -- <path>` resolves paths relative to CWD.  If the project's
+        // working directory is a subdirectory of the repo, those two bases diverge and diff
+        // silently returns nothing (exit 0, empty output).  Always run diff from the toplevel.
+        let topLevel = await repoTopLevel()
+        let args: [String]
+        if untracked {
+            args = ["--no-pager", "diff", "--no-color", "--no-index", "/dev/null", path]
+        } else if staged {
+            args = ["--no-pager", "diff", "--no-color", "--cached", "--", path]
+        } else {
+            args = ["--no-pager", "diff", "--no-color", "--", path]
+        }
+        let result = await runGitCommand(args: args, in: topLevel, executablePath: gitExecutablePath)
+        logDebug("fetchDiff: path=\(path) topLevel=\(topLevel) exitCode=\(result.exitCode) output=\(result.output.count)b error='\(result.error)'")
+        if result.output.isEmpty && !result.error.isEmpty {
+            return "# git error (exit \(result.exitCode)): \(result.error)"
+        }
+        return result.output
+    }
+
+    private func repoTopLevel() async -> String {
+        if let cached = cachedRepoTopLevel { return cached }
+        let result = await runGit(args: ["rev-parse", "--show-toplevel"])
+        let topLevel = result.success
+            ? result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            : workingDirectory
+        cachedRepoTopLevel = topLevel
+        return topLevel
+    }
+
     /// Push to remote
     func push() async -> GitCommandResult {
         let result = await runGit(args: ["push"])
@@ -352,6 +392,10 @@ final class GitService: ObservableObject {
 // MARK: - Shared Git Runner
 
 /// Runs a git command and returns the result. Shared by all git-based services.
+///
+/// Reads stdout and stderr concurrently on background threads *while the process is running*,
+/// then waits for exit. This avoids the classic pipe-buffer deadlock where a process blocks
+/// trying to write more than ~64 KB to stdout because nothing is reading the pipe yet.
 func runGitCommand(args: [String], in workingDirectory: String, executablePath: String) async -> GitCommandResult {
     await withCheckedContinuation { continuation in
         let process = Process()
@@ -364,19 +408,6 @@ func runGitCommand(args: [String], in workingDirectory: String, executablePath: 
         process.standardOutput = outputPipe
         process.standardError = errorPipe
 
-        process.terminationHandler = { _ in
-            let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-            let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: outputData, encoding: .utf8) ?? ""
-            let error = String(data: errorData, encoding: .utf8) ?? ""
-            continuation.resume(returning: GitCommandResult(
-                success: process.terminationStatus == 0,
-                output: output.trimmingCharacters(in: .whitespacesAndNewlines),
-                error: error.trimmingCharacters(in: .whitespacesAndNewlines),
-                exitCode: Int(process.terminationStatus)
-            ))
-        }
-
         do {
             try process.run()
         } catch {
@@ -385,6 +416,39 @@ func runGitCommand(args: [String], in workingDirectory: String, executablePath: 
                 output: "",
                 error: error.localizedDescription,
                 exitCode: -1
+            ))
+            return
+        }
+
+        // Read both pipes concurrently on background threads so we never block the
+        // write side waiting for a reader (which would stall the process indefinitely).
+        let group = DispatchGroup()
+        var outputData = Data()
+        var errorData = Data()
+
+        group.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+            group.leave()
+        }
+
+        group.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+            group.leave()
+        }
+
+        group.notify(queue: .global(qos: .userInitiated)) {
+            process.waitUntilExit()
+            let output = String(data: outputData, encoding: .utf8) ?? ""
+            let error = String(data: errorData, encoding: .utf8) ?? ""
+            continuation.resume(returning: GitCommandResult(
+                success: process.terminationStatus == 0,
+                // Trim only newlines, not spaces — leading spaces are significant
+                // in git porcelain output (they form the XY status columns).
+                output: output.trimmingCharacters(in: .newlines),
+                error: error.trimmingCharacters(in: .newlines),
+                exitCode: Int(process.terminationStatus)
             ))
         }
     }

@@ -640,7 +640,9 @@ private struct GitControlsView: View {
                 .help("Show changed files")
                 .transition(.opacity)
                 .popover(isPresented: $showChangesPopover, arrowEdge: .bottom) {
-                    GitChangesPopover(files: gitService.changedFiles)
+                    GitChangesPopover(files: gitService.changedFiles) { path, staged, untracked in
+                        await gitService.fetchDiff(path: path, staged: staged, untracked: untracked)
+                    }
                 }
             }
         } else if gitService.isLoading {
@@ -695,29 +697,43 @@ private struct GitControlsView: View {
     }
 }
 
+private enum DiffKind { case staged, unstaged, untracked }
+
 private struct GitChangesPopover: View {
     let files: [GitFileChange]
+    let fetchDiff: (String, Bool, Bool) async -> String
 
     private var staged: [GitFileChange] { files.filter { $0.isStaged } }
     private var unstaged: [GitFileChange] { files.filter { $0.isUnstaged } }
     private var untracked: [GitFileChange] { files.filter { $0.isUntracked } }
 
+    // All files start expanded. Toggling a file adds/removes it from this set.
+    @State private var collapsedFiles: Set<String> = []
+    @State private var loadingFiles: Set<String> = []
+    @State private var diffs: [String: String] = [:]
+    @State private var diffTasks: [String: Task<Void, Never>] = [:]
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 16) {
                 if !staged.isEmpty {
-                    section(title: "Staged", color: SwiftUI.Color.blue, files: staged) { $0.stagedLabel }
+                    section(title: "Staged", color: .blue, files: staged, kind: .staged) { $0.stagedLabel }
                 }
                 if !unstaged.isEmpty {
-                    section(title: "Unstaged", color: SwiftUI.Color.yellow, files: unstaged) { $0.unstagedLabel }
+                    section(title: "Unstaged", color: .yellow, files: unstaged, kind: .unstaged) { $0.unstagedLabel }
                 }
                 if !untracked.isEmpty {
-                    section(title: "Untracked", color: SwiftUI.Color.secondary, files: untracked) { _ in "untracked" }
+                    section(title: "Untracked", color: .secondary, files: untracked, kind: .untracked) { _ in "untracked" }
                 }
             }
-            .padding(12)
+            .padding(14)
         }
-        .frame(minWidth: 300, maxWidth: 500, maxHeight: 400)
+        .frame(minWidth: 600, idealWidth: 750, maxWidth: 1100, minHeight: 400, idealHeight: 700, maxHeight: 1000)
+        .onAppear { fetchAllDiffs() }
+        .onDisappear {
+            diffTasks.values.forEach { $0.cancel() }
+            diffTasks.removeAll()
+        }
     }
 
     @ViewBuilder
@@ -725,19 +741,41 @@ private struct GitChangesPopover: View {
         title: String,
         color: SwiftUI.Color,
         files: [GitFileChange],
+        kind: DiffKind,
         label: @escaping (GitFileChange) -> String
     ) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.caption)
                 .fontWeight(.semibold)
                 .foregroundStyle(.primary)
             ForEach(files) { file in
+                fileRow(file: file, color: color, kind: kind, label: label(file))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func fileRow(file: GitFileChange, color: SwiftUI.Color, kind: DiffKind, label: String) -> some View {
+        let isCollapsed = collapsedFiles.contains(file.path)
+        let isLoading   = loadingFiles.contains(file.path)
+
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                if isCollapsed {
+                    collapsedFiles.remove(file.path)
+                } else {
+                    collapsedFiles.insert(file.path)
+                }
+            } label: {
                 HStack(spacing: 6) {
-                    Text(label(file))
+                    Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 10, alignment: .center)
+                    Text(label)
                         .font(.caption2)
                         .foregroundStyle(.primary)
-                        .frame(width: 56, alignment: .leading)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 3)
                         .background {
@@ -750,8 +788,114 @@ private struct GitChangesPopover: View {
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                    Spacer()
                 }
             }
+            .buttonStyle(.plain)
+
+            if !isCollapsed {
+                if isLoading {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text("Loading diff…")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.leading, 14)
+                    .padding(.vertical, 4)
+                } else if let diff = diffs[file.path] {
+                    if diff.isEmpty {
+                        Text("No diff available")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .padding(.leading, 14)
+                            .padding(.vertical, 4)
+                    } else {
+                        DiffContentView(text: diff)
+                            .padding(.leading, 14)
+                    }
+                }
+            }
+        }
+    }
+
+    private func fetchAllDiffs() {
+        let work: [(path: String, kind: DiffKind)] =
+            staged.map { ($0.path, .staged) } +
+            unstaged.map { ($0.path, .unstaged) } +
+            untracked.map { ($0.path, .untracked) }
+
+        for item in work where diffs[item.path] == nil && diffTasks[item.path] == nil {
+            loadingFiles.insert(item.path)
+            diffTasks[item.path] = Task {
+                let diff = await fetchDiff(item.path, item.kind == .staged, item.kind == .untracked)
+                guard !Task.isCancelled else { return }
+                diffs[item.path] = diff
+                loadingFiles.remove(item.path)
+                diffTasks.removeValue(forKey: item.path)
+            }
+        }
+    }
+}
+
+private struct DiffContentView: View {
+    let text: String
+
+    private enum DiffLineKind {
+        case added, removed, hunk, header, comment, context
+
+        init(_ line: String) {
+            if line.hasPrefix("#") { self = .comment; return }
+            if line.hasPrefix("+++") || line.hasPrefix("---") ||
+               line.hasPrefix("diff ") || line.hasPrefix("index ") ||
+               line.hasPrefix("new file") || line.hasPrefix("deleted file") {
+                self = .header; return
+            }
+            if line.hasPrefix("+") { self = .added; return }
+            if line.hasPrefix("-") { self = .removed; return }
+            if line.hasPrefix("@@") { self = .hunk; return }
+            self = .context
+        }
+
+        var foreground: SwiftUI.Color {
+            switch self {
+            case .added:   return SwiftUI.Color(nsColor: .systemGreen)
+            case .removed: return SwiftUI.Color(nsColor: .systemRed)
+            case .hunk:    return SwiftUI.Color(nsColor: .systemBlue)
+            case .header, .comment: return .secondary
+            case .context: return .primary
+            }
+        }
+
+        var background: SwiftUI.Color {
+            switch self {
+            case .added:   return SwiftUI.Color(nsColor: .systemGreen).opacity(0.08)
+            case .removed: return SwiftUI.Color(nsColor: .systemRed).opacity(0.08)
+            case .hunk:    return SwiftUI.Color(nsColor: .systemBlue).opacity(0.08)
+            default:       return .clear
+            }
+        }
+    }
+
+    var body: some View {
+        let lines = text.components(separatedBy: "\n")
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                let kind = DiffLineKind(line)
+                Text(verbatim: line.isEmpty ? " " : line)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(kind.foreground)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 1)
+                    .background(kind.background)
+            }
+        }
+        .background(Color(nsColor: .textBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(.separator, lineWidth: 0.5)
         }
     }
 }
