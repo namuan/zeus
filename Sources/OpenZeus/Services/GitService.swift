@@ -397,61 +397,46 @@ final class GitService: ObservableObject {
 /// then waits for exit. This avoids the classic pipe-buffer deadlock where a process blocks
 /// trying to write more than ~64 KB to stdout because nothing is reading the pipe yet.
 func runGitCommand(args: [String], in workingDirectory: String, executablePath: String) async -> GitCommandResult {
-    await withCheckedContinuation { continuation in
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executablePath)
-        process.arguments = args
-        process.currentDirectoryURL = URL(fileURLWithPath: workingDirectory)
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: executablePath)
+    process.arguments = args
+    process.currentDirectoryURL = URL(fileURLWithPath: workingDirectory)
 
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
-        process.standardOutput = outputPipe
-        process.standardError = errorPipe
+    let outputPipe = Pipe()
+    let errorPipe = Pipe()
+    process.standardOutput = outputPipe
+    process.standardError = errorPipe
 
-        do {
-            try process.run()
-        } catch {
-            continuation.resume(returning: GitCommandResult(
-                success: false,
-                output: "",
-                error: error.localizedDescription,
-                exitCode: -1
-            ))
-            return
-        }
-
-        // Read both pipes concurrently on background threads so we never block the
-        // write side waiting for a reader (which would stall the process indefinitely).
-        let group = DispatchGroup()
-        var outputData = Data()
-        var errorData = Data()
-
-        group.enter()
-        DispatchQueue.global(qos: .userInitiated).async {
-            outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-            group.leave()
-        }
-
-        group.enter()
-        DispatchQueue.global(qos: .userInitiated).async {
-            errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-            group.leave()
-        }
-
-        group.notify(queue: .global(qos: .userInitiated)) {
-            process.waitUntilExit()
-            let output = String(data: outputData, encoding: .utf8) ?? ""
-            let error = String(data: errorData, encoding: .utf8) ?? ""
-            continuation.resume(returning: GitCommandResult(
-                success: process.terminationStatus == 0,
-                // Trim only newlines, not spaces — leading spaces are significant
-                // in git porcelain output (they form the XY status columns).
-                output: output.trimmingCharacters(in: .newlines),
-                error: error.trimmingCharacters(in: .newlines),
-                exitCode: Int(process.terminationStatus)
-            ))
-        }
+    do {
+        try process.run()
+    } catch {
+        outputPipe.fileHandleForReading.closeFile()
+        errorPipe.fileHandleForReading.closeFile()
+        return GitCommandResult(
+            success: false,
+            output: "",
+            error: error.localizedDescription,
+            exitCode: -1
+        )
     }
+
+    // Read both pipes concurrently as child tasks so we never block the write side
+    // waiting for a reader (which would stall the process indefinitely on > ~64 KB output).
+    let outputFH = outputPipe.fileHandleForReading
+    let errorFH = errorPipe.fileHandleForReading
+    async let outputData: Data = outputFH.readDataToEndOfFile()
+    async let errorData: Data = errorFH.readDataToEndOfFile()
+    let (out, err) = await (outputData, errorData)
+    process.waitUntilExit()
+
+    // Trim only newlines, not spaces — leading spaces are significant
+    // in git porcelain output (they form the XY status columns).
+    return GitCommandResult(
+        success: process.terminationStatus == 0,
+        output: (String(data: out, encoding: .utf8) ?? "").trimmingCharacters(in: .newlines),
+        error: (String(data: err, encoding: .utf8) ?? "").trimmingCharacters(in: .newlines),
+        exitCode: Int(process.terminationStatus)
+    )
 }
 
 // MARK: - Types

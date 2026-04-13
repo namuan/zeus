@@ -158,23 +158,37 @@ struct ContentView: View {
 
 // NavigationSplitView injects a sidebar-toggle item at the AppKit NSToolbar level that
 // SwiftUI's .toolbar(removing:) alone doesn't reach — this helper removes it directly.
+//
+// NavigationSplitView populates the toolbar via its NSToolbarDelegate
+// (toolbarDefaultItemIdentifiers), not via programmatic insertItem calls, so notification-
+// based approaches never fire. Instead we poll until the toggle actually appears, then
+// remove it — robust to any timing of NavigationSplitView's internal setup.
 private struct SidebarToggleRemover: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        Task { @MainActor in
-            // The window isn't attached when makeNSView fires; retry until it is.
-            for _ in 0..<20 {
-                if let toolbar = view.window?.toolbar {
-                    for (idx, item) in toolbar.items.enumerated().reversed() where item.itemIdentifier == .toggleSidebar {
+    func makeNSView(context: Context) -> SidebarRemoverView { SidebarRemoverView() }
+    func updateNSView(_ nsView: SidebarRemoverView, context: Context) {}
+
+    // SwiftUI's NavigationSplitView registers its toggle under its own identifier,
+    // not the AppKit "NSToolbarToggleSidebarItem" that NSToolbarItem.Identifier.toggleSidebar resolves to.
+    static let swiftUIToggleID = NSToolbarItem.Identifier("com.apple.SwiftUI.navigationSplitView.toggleSidebar")
+
+    class SidebarRemoverView: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard window != nil else { return }
+            Task { @MainActor [weak self] in
+                let swiftUIToggleID = SidebarToggleRemover.swiftUIToggleID
+                for attempt in 0..<100 { // poll up to 2 s
+                    guard let self else { return }
+                    if let toolbar = self.window?.toolbar,
+                       let idx = toolbar.items.lastIndex(where: { $0.itemIdentifier == swiftUIToggleID }) {
                         toolbar.removeItem(at: idx)
+                        logDebug("Sidebar toggle removed at attempt \(attempt)")
+                        return
                     }
-                    return
+                    try? await Task.sleep(nanoseconds: 20_000_000) // 20 ms
                 }
-                try? await Task.sleep(nanoseconds: 10_000_000) // 10 ms
+                logWarning("Sidebar toggle not found after 100 attempts")
             }
         }
-        return view
     }
-
-    func updateNSView(_ nsView: NSView, context: Context) {}
 }
