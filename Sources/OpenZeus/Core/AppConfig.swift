@@ -106,15 +106,18 @@ struct LLMConfig: Codable, Equatable, Sendable {
     var provider: String
     var model: String
     var apiKeyEnvironmentVariable: String
+    var baseUrl: String
 
     init(
         provider: String = "anthropic",
         model: String = "claude-sonnet-4-20250514",
-        apiKeyEnvironmentVariable: String = "ANTHROPIC_API_KEY"
+        apiKeyEnvironmentVariable: String = "ANTHROPIC_API_KEY",
+        baseUrl: String = "https://api.anthropic.com/v1/"
     ) {
         self.provider = provider
         self.model = model
         self.apiKeyEnvironmentVariable = apiKeyEnvironmentVariable
+        self.baseUrl = baseUrl
     }
 
     init(from decoder: Decoder) throws {
@@ -123,6 +126,39 @@ struct LLMConfig: Codable, Equatable, Sendable {
         provider = (try? c.decode(String.self, forKey: .provider)) ?? d.provider
         model = (try? c.decode(String.self, forKey: .model)) ?? d.model
         apiKeyEnvironmentVariable = (try? c.decode(String.self, forKey: .apiKeyEnvironmentVariable)) ?? d.apiKeyEnvironmentVariable
+        baseUrl = (try? c.decode(String.self, forKey: .baseUrl)) ?? d.baseUrl
+    }
+
+    static let knownProviders = ["anthropic", "openai", "google", "ollama", "openrouter", "custom"]
+
+    struct ProviderDefaults {
+        let model: String
+        let apiKeyEnvironmentVariable: String
+        let baseUrl: String
+    }
+
+    static func defaults(for provider: String) -> ProviderDefaults {
+        switch provider {
+        case "anthropic":
+            return ProviderDefaults(model: "claude-sonnet-4-20250514", apiKeyEnvironmentVariable: "ANTHROPIC_API_KEY", baseUrl: "https://api.anthropic.com/v1/")
+        case "openai":
+            return ProviderDefaults(model: "gpt-4o", apiKeyEnvironmentVariable: "OPENAI_API_KEY", baseUrl: "https://api.openai.com/v1/")
+        case "google":
+            return ProviderDefaults(model: "gemini-2.0-flash", apiKeyEnvironmentVariable: "GOOGLE_API_KEY", baseUrl: "https://generativelanguage.googleapis.com/v1beta/")
+        case "ollama":
+            return ProviderDefaults(model: "llama3.2", apiKeyEnvironmentVariable: "", baseUrl: "http://localhost:11434/v1/")
+        case "openrouter":
+            return ProviderDefaults(model: "openai/gpt-4o", apiKeyEnvironmentVariable: "OPENROUTER_API_KEY", baseUrl: "https://openrouter.ai/api/v1/")
+        default:
+            return ProviderDefaults(model: "", apiKeyEnvironmentVariable: "", baseUrl: "")
+        }
+    }
+
+    mutating func applyDefaults() {
+        let d = LLMConfig.defaults(for: provider)
+        model = d.model
+        apiKeyEnvironmentVariable = d.apiKeyEnvironmentVariable
+        baseUrl = d.baseUrl
     }
 }
 

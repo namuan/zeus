@@ -600,23 +600,35 @@ private struct DataTab: View {
 private struct LLMTab: View {
     @Binding var config: LLMConfig
 
-    private static let knownProviders = ["anthropic", "openai", "google", "ollama", "openrouter", "custom"]
-
     var body: some View {
         Form {
             Section("Provider") {
                 Picker("Provider", selection: $config.provider) {
-                    ForEach(Self.knownProviders, id: \.self) { provider in
+                    ForEach(LLMConfig.knownProviders, id: \.self) { provider in
                         Text(provider.capitalized).tag(provider)
                     }
                 }
+                .onChange(of: config.provider) { _, _ in
+                    config.applyDefaults()
+                }
+            }
 
+            Section("Connection") {
+                TextField("Base URL", text: $config.baseUrl)
+                    .help("API base URL for the selected provider.")
                 TextField("Model", text: $config.model)
             }
 
             Section("Authentication") {
                 TextField("API key env var", text: $config.apiKeyEnvironmentVariable)
                     .help("Environment variable name to read the API key from.")
+            }
+
+            Section {
+                Button("Reset to Defaults") {
+                    config.applyDefaults()
+                }
+                .disabled(config.provider == "custom")
             }
         }
         .formStyle(.grouped)
