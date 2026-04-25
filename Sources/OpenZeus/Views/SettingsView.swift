@@ -31,11 +31,11 @@ struct SettingsView: View {
                 InterfaceTab(config: $config.ui)
                     .tabItem { Label("Interface", systemImage: "sidebar.left") }
 
-                StorageTab(config: $config.storage)
-                    .tabItem { Label("Storage", systemImage: "externaldrive") }
+                DataTab(storage: $config.storage, logging: $config.logging)
+                    .tabItem { Label("Data", systemImage: "externaldrive") }
 
-                LoggingTab(config: $config.logging)
-                    .tabItem { Label("Logging", systemImage: "doc.text") }
+                LLMTab(config: $config.llm)
+                    .tabItem { Label("LLM", systemImage: "sparkles") }
             }
             .frame(width: 500, height: 480)
         }
@@ -499,18 +499,65 @@ private struct InterfaceTab: View {
     }
 }
 
-// MARK: - Storage
+// MARK: - Data
 
-private struct StorageTab: View {
-    @Binding var config: StorageConfig
+private struct DataTab: View {
+    @Binding var storage: StorageConfig
+    @Binding var logging: LoggingConfig
+
+    private var fileSizeMB: Binding<Double> {
+        Binding(
+            get: { Double(logging.maxFileSizeBytes) / 1_048_576 },
+            set: { logging.maxFileSizeBytes = max(1, Int($0 * 1_048_576)) }
+        )
+    }
 
     var body: some View {
         Form {
             Section("Database Location") {
-                TextField("App support folder", text: $config.appSupportFolderName)
+                TextField("App support folder", text: $storage.appSupportFolderName)
                     .help("Folder inside ~/Library/Application Support/ where the database is stored.")
-                TextField("Database file", text: $config.databaseFileName)
+                TextField("Database file", text: $storage.databaseFileName)
                     .help("SQLite database file name.")
+            }
+
+            Section("Logs") {
+                HStack {
+                    TextField("Logs directory", text: $logging.logsDirectory)
+                        .help("Path relative to $HOME.")
+                    Button("Reveal") { revealLogsFolder() }
+                }
+                TextField("Log file name", text: $logging.logFileName)
+            }
+
+            Section("Log Rotation") {
+                HStack {
+                    Text("Max file size")
+                    Spacer()
+                    TextField("", value: fileSizeMB, format: .number.precision(.fractionLength(0)))
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 56)
+                    Text("MB").foregroundStyle(.secondary)
+                }
+
+                HStack {
+                    Text("Backup files")
+                    Spacer()
+                    TextField("", value: $logging.maxBackupFiles, format: .number)
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 56)
+                    Stepper("", value: $logging.maxBackupFiles, in: 1...20)
+                        .labelsHidden()
+                }
+            }
+
+            Section("Log Timestamps") {
+                TextField("Format string", text: $logging.timestampFormat)
+                    .font(.system(.body, design: .monospaced))
+                    .help("DateFormatter format string, e.g. \"yyyy-MM-dd HH:mm:ss.SSS\".")
+                Text("Preview: \(formattedNow)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section {
@@ -526,75 +573,46 @@ private struct StorageTab: View {
         }
         .formStyle(.grouped)
     }
-}
-
-// MARK: - Logging
-
-private struct LoggingTab: View {
-    @Binding var config: LoggingConfig
-
-    private var fileSizeMB: Binding<Double> {
-        Binding(
-            get: { Double(config.maxFileSizeBytes) / 1_048_576 },
-            set: { config.maxFileSizeBytes = max(1, Int($0 * 1_048_576)) }
-        )
-    }
-
-    var body: some View {
-        Form {
-            Section("Paths") {
-                HStack {
-                    TextField("Logs directory", text: $config.logsDirectory)
-                        .help("Path relative to $HOME.")
-                    Button("Reveal") { revealLogsFolder() }
-                }
-                TextField("Log file name", text: $config.logFileName)
-            }
-
-            Section("Rotation") {
-                HStack {
-                    Text("Max file size")
-                    Spacer()
-                    TextField("", value: fileSizeMB, format: .number.precision(.fractionLength(0)))
-                        .multilineTextAlignment(.trailing)
-                        .frame(width: 56)
-                    Text("MB").foregroundStyle(.secondary)
-                }
-
-                HStack {
-                    Text("Backup files")
-                    Spacer()
-                    TextField("", value: $config.maxBackupFiles, format: .number)
-                        .multilineTextAlignment(.trailing)
-                        .frame(width: 56)
-                    Stepper("", value: $config.maxBackupFiles, in: 1...20)
-                        .labelsHidden()
-                }
-            }
-
-            Section("Timestamp Format") {
-                TextField("Format string", text: $config.timestampFormat)
-                    .font(.system(.body, design: .monospaced))
-                    .help("DateFormatter format string, e.g. \"yyyy-MM-dd HH:mm:ss.SSS\".")
-                Text("Preview: \(formattedNow)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .formStyle(.grouped)
-    }
 
     private var formattedNow: String {
         let f = DateFormatter()
-        f.dateFormat = config.timestampFormat
+        f.dateFormat = logging.timestampFormat
         return f.string(from: Date())
     }
 
     private func revealLogsFolder() {
         let home = FileManager.default.homeDirectoryForCurrentUser
-        let url = home.appendingPathComponent(config.logsDirectory)
+        let url = home.appendingPathComponent(logging.logsDirectory)
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         NSWorkspace.shared.open(url)
+    }
+}
+
+// MARK: - LLM
+
+private struct LLMTab: View {
+    @Binding var config: LLMConfig
+
+    private static let knownProviders = ["anthropic", "openai", "google", "ollama", "openrouter", "custom"]
+
+    var body: some View {
+        Form {
+            Section("Provider") {
+                Picker("Provider", selection: $config.provider) {
+                    ForEach(Self.knownProviders, id: \.self) { provider in
+                        Text(provider.capitalized).tag(provider)
+                    }
+                }
+
+                TextField("Model", text: $config.model)
+            }
+
+            Section("Authentication") {
+                TextField("API key env var", text: $config.apiKeyEnvironmentVariable)
+                    .help("Environment variable name to read the API key from.")
+            }
+        }
+        .formStyle(.grouped)
     }
 }
 

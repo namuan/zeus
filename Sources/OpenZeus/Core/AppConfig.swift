@@ -5,6 +5,7 @@ import SwiftUI
 
 struct AppConfig: Codable, Equatable, Sendable {
     var terminal: TerminalConfig
+    var llm: LLMConfig
     var logging: LoggingConfig
     var notifications: NotificationConfig
     var storage: StorageConfig
@@ -14,6 +15,7 @@ struct AppConfig: Codable, Equatable, Sendable {
 
     init(
         terminal: TerminalConfig = .init(),
+        llm: LLMConfig = .init(),
         logging: LoggingConfig = .init(),
         notifications: NotificationConfig = .init(),
         storage: StorageConfig = .init(),
@@ -22,6 +24,7 @@ struct AppConfig: Codable, Equatable, Sendable {
         worktree: WorktreeConfig = .init()
     ) {
         self.terminal = terminal
+        self.llm = llm
         self.logging = logging
         self.notifications = notifications
         self.storage = storage
@@ -33,6 +36,7 @@ struct AppConfig: Codable, Equatable, Sendable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         terminal      = (try? c.decode(TerminalConfig.self, forKey: .terminal))      ?? .init()
+        llm           = (try? c.decode(LLMConfig.self, forKey: .llm))           ?? .init()
         logging       = (try? c.decode(LoggingConfig.self, forKey: .logging))       ?? .init()
         notifications = (try? c.decode(NotificationConfig.self, forKey: .notifications)) ?? .init()
         storage       = (try? c.decode(StorageConfig.self, forKey: .storage))       ?? .init()
@@ -94,6 +98,32 @@ extension EnvironmentValues {
 
 extension Notification.Name {
     static let appConfigChanged = Notification.Name("AppConfigChanged")
+}
+
+// MARK: - LLM
+
+struct LLMConfig: Codable, Equatable, Sendable {
+    var provider: String
+    var model: String
+    var apiKeyEnvironmentVariable: String
+
+    init(
+        provider: String = "anthropic",
+        model: String = "claude-sonnet-4-20250514",
+        apiKeyEnvironmentVariable: String = "ANTHROPIC_API_KEY"
+    ) {
+        self.provider = provider
+        self.model = model
+        self.apiKeyEnvironmentVariable = apiKeyEnvironmentVariable
+    }
+
+    init(from decoder: Decoder) throws {
+        let d = LLMConfig()
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        provider = (try? c.decode(String.self, forKey: .provider)) ?? d.provider
+        model = (try? c.decode(String.self, forKey: .model)) ?? d.model
+        apiKeyEnvironmentVariable = (try? c.decode(String.self, forKey: .apiKeyEnvironmentVariable)) ?? d.apiKeyEnvironmentVariable
+    }
 }
 
 // MARK: - Terminal
