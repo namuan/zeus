@@ -521,6 +521,17 @@ private struct DataTab: View {
                     .help("SQLite database file name.")
             }
 
+            Section {
+                Label {
+                    Text("Changing these paths causes OpenZeus to open a new, empty database on next launch. Existing data is not migrated automatically.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                }
+            }
+
             Section("Logs") {
                 HStack {
                     TextField("Logs directory", text: $logging.logsDirectory)
@@ -560,16 +571,6 @@ private struct DataTab: View {
                     .foregroundStyle(.secondary)
             }
 
-            Section {
-                Label {
-                    Text("Changing these paths causes OpenZeus to open a new, empty database on next launch. Existing data is not migrated automatically.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } icon: {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                }
-            }
         }
         .formStyle(.grouped)
     }
