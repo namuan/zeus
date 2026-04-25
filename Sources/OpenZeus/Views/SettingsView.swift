@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 
 struct SettingsView: View {
+    @Environment(\.dismiss) private var dismiss
     @State private var config: AppConfig
     @State private var saveTask: Task<Void, Never>?
 
@@ -38,6 +39,11 @@ struct SettingsView: View {
                     .tabItem { Label("Logging", systemImage: "doc.text") }
             }
             .frame(width: 500, height: 480)
+        }
+        .background {
+            Button(action: { dismiss() }) { EmptyView() }
+                .keyboardShortcut(.escape, modifiers: [])
+                .accessibilityHidden(true)
         }
         .onAppear {
             config = AppConfig.load()
