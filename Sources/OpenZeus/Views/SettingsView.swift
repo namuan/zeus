@@ -434,6 +434,47 @@ private struct WorktreeTab: View {
             }
         }
 
+        let resolvedBase = config.resolvedBasePath
+        if !resolvedBase.isEmpty {
+            let fm = FileManager.default
+            let projects = (try? fm.contentsOfDirectory(atPath: resolvedBase)) ?? []
+            let dbProjects = Set(appDatabase.projects.map { WorktreeService.projectSlug(from: $0.name) })
+            let dbTasks = Set(appDatabase.tasks.map { $0.id.uuidString })
+
+            for projectSlug in projects {
+                let projectPath = "\(resolvedBase)/\(projectSlug)"
+                var isDir: ObjCBool = false
+                guard fm.fileExists(atPath: projectPath, isDirectory: &isDir), isDir.boolValue else { continue }
+
+                let tasks = (try? fm.contentsOfDirectory(atPath: projectPath)) ?? []
+                let projectExists = dbProjects.contains(projectSlug)
+
+                for taskUUID in tasks {
+                    let taskPath = "\(projectPath)/\(taskUUID)"
+                    guard fm.fileExists(atPath: taskPath, isDirectory: &isDir), isDir.boolValue else { continue }
+
+                    let taskExists = dbTasks.contains(taskUUID)
+                    if !projectExists && !taskExists {
+                        found.append(CleanupItem(
+                            kind: .orphanedWorktreeDirectory(path: taskPath, projectSlug: projectSlug, taskUUID: taskUUID),
+                            title: "Orphaned worktree directory",
+                            detail: taskPath,
+                            reason: "No project '\(projectSlug)' or task \(taskUUID.prefix(8))… exists in the database"
+                        ))
+                    }
+                }
+
+                if !projectExists && tasks.isEmpty {
+                    found.append(CleanupItem(
+                        kind: .orphanedWorktreeDirectory(path: projectPath, projectSlug: projectSlug, taskUUID: nil),
+                        title: "Orphaned project directory",
+                        detail: projectPath,
+                        reason: "No project '\(projectSlug)' exists in the database and the directory is empty"
+                    ))
+                }
+            }
+        }
+
         cleanupItems = found
         isScanning = false
         hasScanned = true
@@ -475,6 +516,9 @@ private struct WorktreeTab: View {
             updated.worktreePath = nil
             updated.worktreeBranch = nil
             appDatabase.updateTask(updated)
+
+        case .orphanedWorktreeDirectory(let path, _, _):
+            try? FileManager.default.removeItem(atPath: path)
         }
     }
 }
@@ -641,6 +685,7 @@ private enum CleanupItemKind {
     case orphanedTmuxSession(sessionName: String)
     case archivedTaskWithWorktree(task: AgentTask)
     case staleWorktreeReference(task: AgentTask)
+    case orphanedWorktreeDirectory(path: String, projectSlug: String?, taskUUID: String?)
 }
 
 private struct CleanupItem: Identifiable {
@@ -654,6 +699,7 @@ private struct CleanupItem: Identifiable {
         case .orphanedTmuxSession: .red
         case .archivedTaskWithWorktree: .orange
         case .staleWorktreeReference: .secondary
+        case .orphanedWorktreeDirectory: .red
         }
     }
     var tagLabel: String {
@@ -661,6 +707,7 @@ private struct CleanupItem: Identifiable {
         case .orphanedTmuxSession: "tmux"
         case .archivedTaskWithWorktree: "worktree"
         case .staleWorktreeReference: "stale ref"
+        case .orphanedWorktreeDirectory: "orphaned"
         }
     }
 }
