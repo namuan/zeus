@@ -489,6 +489,47 @@ private func killTmuxSessionSync(_ tmux: String, sessionName: String) {
     killTmuxSessionSync(tmux, sessionName: sessionName)
 }
 
+@Test @MainActor func tmuxPaneZoomToggleTest() async {
+    guard let tmux = tmuxExecutable() else {
+        return  // Skip if tmux not installed
+    }
+
+    let sessionName = "zeus-test-zoom-\(UUID().uuidString.prefix(8))"
+
+    // Create session with multiple panes
+    _ = await runProcessOutput(tmux, args: [
+        "new-session", "-d", "-s", sessionName, "/bin/bash"
+    ])
+    _ = await runProcessOutput(tmux, args: [
+        "split-window", "-h", "-t", sessionName
+    ])
+
+    // Zoom the pane
+    _ = await runProcessOutput(tmux, args: [
+        "resize-pane", "-Z", "-t", sessionName
+    ])
+
+    // Verify zoomed flag
+    let zoomed = await runProcessOutput(tmux, args: [
+        "display", "-p", "-t", sessionName, "#{window_zoomed_flag}"
+    ])
+    #expect(zoomed.trimmingCharacters(in: .whitespacesAndNewlines) == "1")
+
+    // Unzoom the pane
+    _ = await runProcessOutput(tmux, args: [
+        "resize-pane", "-Z", "-t", sessionName
+    ])
+
+    // Verify unzoomed flag
+    let unzoomed = await runProcessOutput(tmux, args: [
+        "display", "-p", "-t", sessionName, "#{window_zoomed_flag}"
+    ])
+    #expect(unzoomed.trimmingCharacters(in: .whitespacesAndNewlines) == "0")
+
+    // Cleanup
+    killTmuxSessionSync(tmux, sessionName: sessionName)
+}
+
 @Test @MainActor func tmuxWindowCloseTest() async {
     guard let tmux = tmuxExecutable() else {
         return  // Skip if tmux not installed

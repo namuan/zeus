@@ -265,6 +265,15 @@ private struct WindowControlBar: View {
         .help("Rotate Panes")
 
         Button {
+            logInfo("WindowControlBar: zoom pane button clicked")
+            entry.togglePaneZoom()
+        } label: {
+            Image(systemName: "arrow.up.left.and.arrow.down.right")
+        }
+        .disabled(entry.paneCount <= 1)
+        .help("Zoom Pane")
+
+        Button {
             logInfo("WindowControlBar: xmark (close) button clicked")
             entry.closeWindow()
         } label: {
