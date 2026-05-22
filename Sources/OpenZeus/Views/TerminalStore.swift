@@ -328,6 +328,25 @@ final class TerminalEntry: ObservableObject {
         }
     }
 
+    func togglePaneZoom() {
+        logInfo("togglePaneZoom: requested for session \(sessionName)")
+
+        guard let tmux = tmuxExecutable(searchPaths: config.tmuxSearchPaths) else {
+            logError("togglePaneZoom: tmux executable not found")
+            return
+        }
+
+        Task {
+            logDebug("togglePaneZoom: executing tmux resize-pane -Z")
+            let output = await runProcessOutput(tmux, args: ["resize-pane", "-Z", "-t", sessionName])
+            logDebug("togglePaneZoom: tmux output='\(output)'")
+
+            try? await Task.sleep(for: .milliseconds(config.tmuxSettleDelayMs))
+            await checkActiveProcess()
+            logInfo("togglePaneZoom: completed")
+        }
+    }
+
     func closeWindow() {
         logInfo("closeWindow: requested for session \(sessionName), windows count=\(windows.count)")
 
