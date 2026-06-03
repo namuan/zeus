@@ -468,19 +468,9 @@ private extension String {
 
 private struct ActiveProcessBadge: View {
     var body: some View {
-        HStack(spacing: 3) {
-            Circle()
-                .fill(.green)
-                .frame(width: 6, height: 6)
-            Text("Active")
-                .font(.caption2)
-                .fontWeight(.medium)
-                .foregroundStyle(.green)
-        }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
-        .background(.green.opacity(0.12))
-        .clipShape(Capsule())
+        Circle()
+            .fill(.green)
+            .frame(width: 6, height: 6)
     }
 }
 
