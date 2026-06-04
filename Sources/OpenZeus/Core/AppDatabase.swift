@@ -115,6 +115,11 @@ final class AppDatabase: ObservableObject {
             try db.execute(sql: "DROP TABLE projectApps")
             try db.execute(sql: "ALTER TABLE projectApps_new RENAME TO projectApps")
         }
+        migrator.registerMigration("v13") { db in
+            try db.alter(table: "tasks") { t in
+                t.add(column: "notes", .text)
+            }
+        }
         try migrator.migrate(db)
         // Remove stale records left by abandoned-branch migrations (v5, v9, v10).
         // These were never part of the canonical schema; deleting them keeps
