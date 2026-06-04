@@ -1,0 +1,1 @@
+Add notes field to AgentTask model, migration v13, and inline popover UI for viewing/editing task notes
