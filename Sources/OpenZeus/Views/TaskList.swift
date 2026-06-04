@@ -302,6 +302,8 @@ private struct TaskRow: View {
     @EnvironmentObject var terminalStore: TerminalStore
     @EnvironmentObject var appDatabase: AppDatabase
     @State private var showingEdit = false
+    @State private var showingNotes = false
+    @State private var notesText = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -366,6 +368,25 @@ private struct TaskRow: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
+                    Button {
+                        notesText = task.notes ?? ""
+                        showingNotes = true
+                    } label: {
+                        Image(systemName: "note.text")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle((task.notes?.isEmpty == false) ? Color.accentColor : .secondary)
+                    .help("Task Notes")
+                    .popover(isPresented: $showingNotes, arrowEdge: .bottom) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Notes")
+                                .font(.headline)
+                            TextEditor(text: $notesText)
+                                .font(.body)
+                                .frame(width: 300, height: 200)
+                        }
+                        .padding()
+                    }
                 }
                 Button(action: onArchive) {
                     Image(systemName: task.isArchived ? "arrow.uturn.backward.circle" : "checkmark.circle")
@@ -382,6 +403,13 @@ private struct TaskRow: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .contentShape(Rectangle())
         .onTapGesture { if !task.isArchived { onSelect() } }
+        .onChange(of: showingNotes) { _, isShowing in
+            if !isShowing {
+                var updated = task
+                updated.notes = notesText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : notesText
+                appDatabase.updateTask(updated)
+            }
+        }
         .sheet(isPresented: $showingEdit) {
             EditTaskSheet(task: task)
         }

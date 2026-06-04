@@ -15,6 +15,7 @@ struct AgentTask: Identifiable {
     var isArchived: Bool = false
     var worktreePath: String?
     var worktreeBranch: String?
+    var notes: String?
 
     /// The directory the terminal should open in.
     /// Uses the worktree path when one has been created, otherwise the task's working directory.
@@ -48,6 +49,7 @@ extension AgentTask: FetchableRecord {
         isArchived = (row["isArchived"] as? Int64 ?? 0) != 0
         worktreePath = row["worktreePath"]
         worktreeBranch = row["worktreeBranch"]
+        notes = row["notes"]
     }
 }
 
@@ -73,5 +75,6 @@ extension AgentTask: PersistableRecord {
         container["isArchived"] = isArchived ? 1 : 0
         container["worktreePath"] = worktreePath
         container["worktreeBranch"] = worktreeBranch
+        container["notes"] = notes
     }
 }
