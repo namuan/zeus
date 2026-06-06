@@ -366,6 +366,34 @@ final class TerminalEntry: ObservableObject {
         }
     }
 
+    func popOut() {
+        logInfo("popOut: opening session \(sessionName) in Terminal.app")
+
+        guard let tmux = tmuxExecutable(searchPaths: config.tmuxSearchPaths) else { return }
+
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent("zeus-popout-\(taskID.uuidString).command")
+        try? "#!/bin/bash\n\(tmux) attach -t \(sessionName)\n"
+            .write(to: path, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path.path)
+
+        if NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Terminal").isEmpty {
+            NSWorkspace.shared.open(
+                [path],
+                withApplicationAt: URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app"),
+                configuration: NSWorkspace.OpenConfiguration()
+            )
+        } else {
+            NSWorkspace.shared.open(path)
+            Task {
+                try? await Task.sleep(for: .milliseconds(200))
+                NSRunningApplication.runningApplications(
+                    withBundleIdentifier: "com.apple.Terminal"
+                ).first?.activate()
+            }
+        }
+    }
+
     func selectWindow(index: Int) {
         logInfo("selectWindow: requested index=\(index), current=\(currentWindowIndex)")
 
