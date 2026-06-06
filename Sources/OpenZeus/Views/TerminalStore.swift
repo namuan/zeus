@@ -377,6 +377,11 @@ final class TerminalEntry: ObservableObject {
             .write(to: path, atomically: true, encoding: .utf8)
         try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path.path)
         NSWorkspace.shared.open(path)
+        if let terminal = NSRunningApplication.runningApplications(
+            withBundleIdentifier: "com.apple.Terminal"
+        ).first {
+            terminal.activate()
+        }
     }
 
     func selectWindow(index: Int) {
