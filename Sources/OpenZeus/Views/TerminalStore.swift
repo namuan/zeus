@@ -376,11 +376,21 @@ final class TerminalEntry: ObservableObject {
         try? "#!/bin/bash\n\(tmux) attach -t \(sessionName)\n"
             .write(to: path, atomically: true, encoding: .utf8)
         try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path.path)
-        NSWorkspace.shared.open(path)
-        if let terminal = NSRunningApplication.runningApplications(
-            withBundleIdentifier: "com.apple.Terminal"
-        ).first {
-            terminal.activate()
+
+        if NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Terminal").isEmpty {
+            NSWorkspace.shared.open(
+                [path],
+                withApplicationAt: URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app"),
+                configuration: NSWorkspace.OpenConfiguration()
+            )
+        } else {
+            NSWorkspace.shared.open(path)
+            Task {
+                try? await Task.sleep(for: .milliseconds(200))
+                NSRunningApplication.runningApplications(
+                    withBundleIdentifier: "com.apple.Terminal"
+                ).first?.activate()
+            }
         }
     }
 
