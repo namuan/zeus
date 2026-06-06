@@ -282,6 +282,14 @@ private struct WindowControlBar: View {
         .disabled(entry.windows.count <= 1)
         .help("Close Window")
 
+        Button {
+            logInfo("WindowControlBar: pop out button clicked")
+            entry.popOut()
+        } label: {
+            Image(systemName: "rectangle.portrait.and.arrow.right")
+        }
+        .help("Pop Out to Terminal.app")
+
         Divider().frame(height: 16)
 
         Button {
