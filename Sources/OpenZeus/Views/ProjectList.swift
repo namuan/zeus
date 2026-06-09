@@ -9,6 +9,7 @@ struct ProjectList: View {
 
     @State private var projectToDelete: Project?
     @State private var searchText = ""
+    @State private var clipboardError: String?
 
     private var filteredProjects: [Project] {
         guard !searchText.isEmpty else { return appDatabase.projects }
@@ -44,6 +45,13 @@ struct ProjectList: View {
         .searchable(text: $searchText, placement: .sidebar, prompt: "Search projects")
         .toolbar {
             ToolbarItem {
+                Button(action: addProjectFromClipboard) {
+                    Label("Add from Clipboard", systemImage: "doc.on.clipboard")
+                }
+                .help("Add project from clipboard path (⌘⇧V)")
+                .keyboardShortcut("V", modifiers: [.command, .shift])
+            }
+            ToolbarItem {
                 Button(action: addProject) {
                     Label("Add Project", systemImage: "plus")
                 }
@@ -62,6 +70,14 @@ struct ProjectList: View {
             }
         } message: {
             Text("All tasks for this project will also be deleted. This cannot be undone.")
+        }
+        .alert("Clipboard", isPresented: Binding(
+            get: { clipboardError != nil },
+            set: { if !$0 { clipboardError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(clipboardError ?? "")
         }
     }
 
@@ -93,6 +109,27 @@ struct ProjectList: View {
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        insertProject(from: url)
+    }
+
+    private func addProjectFromClipboard() {
+        guard let raw = NSPasteboard.general.string(forType: .string)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !raw.isEmpty
+        else {
+            clipboardError = "Clipboard does not contain text."
+            return
+        }
+        let url = URL(fileURLWithPath: raw)
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue else {
+            clipboardError = "Path is not a directory:\n\(raw)"
+            return
+        }
+        insertProject(from: url)
+    }
+
+    private func insertProject(from url: URL) {
         let project = Project(id: UUID(), name: url.lastPathComponent, directoryURL: url)
         appDatabase.insertProject(project)
         selection = project
