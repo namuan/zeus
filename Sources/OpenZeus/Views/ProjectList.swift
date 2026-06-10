@@ -10,14 +10,21 @@ struct ProjectList: View {
     @State private var projectToDelete: Project?
     @State private var searchText = ""
     @State private var clipboardError: String?
+    @State private var showOnlyActive = false
 
     private var filteredProjects: [Project] {
-        guard !searchText.isEmpty else { return appDatabase.projects }
-        let query = searchText.lowercased()
-        return appDatabase.projects.filter {
-            $0.name.lowercased().contains(query) ||
-            $0.directoryURL.path(percentEncoded: false).lowercased().contains(query)
+        var result = appDatabase.projects
+        if showOnlyActive {
+            result = result.filter { runningTaskCount(for: $0) > 0 || openTaskCount(for: $0) > 0 }
         }
+        if !searchText.isEmpty {
+            let query = searchText.lowercased()
+            result = result.filter {
+                $0.name.lowercased().contains(query) ||
+                $0.directoryURL.path(percentEncoded: false).lowercased().contains(query)
+            }
+        }
+        return result
     }
 
     var body: some View {
@@ -44,6 +51,15 @@ struct ProjectList: View {
         .navigationTitle("Projects")
         .searchable(text: $searchText, placement: .sidebar, prompt: "Search projects")
         .toolbar {
+            ToolbarItem {
+                Button(action: { showOnlyActive.toggle() }) {
+                    let image = showOnlyActive
+                        ? "line.3.horizontal.decrease.circle.fill"
+                        : "line.3.horizontal.decrease.circle"
+                    Label("Filter Active", systemImage: image)
+                }
+                .help("Show only projects with running or open tasks")
+            }
             ToolbarItem {
                 Button(action: addProjectFromClipboard) {
                     Label("Add from Clipboard", systemImage: "doc.on.clipboard")
