@@ -33,13 +33,23 @@ struct TaskList: View {
             }
             .onDelete(perform: deleteTasks)
 
-            Button(action: { showingNewTask = true }) {
-                Label("New Task", systemImage: "plus.circle.fill")
-                    .foregroundStyle(Color.accentColor)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 4)
+            HStack(spacing: 0) {
+                Button(action: { showingNewTask = true }) {
+                    Label("New Task", systemImage: "plus.circle.fill")
+                        .foregroundStyle(Color.accentColor)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 4)
+                }
+                .buttonStyle(.plain)
+
+                Button(action: createQuickTask) {
+                    Label("Quick Task", systemImage: "bolt.fill")
+                        .foregroundStyle(Color.accentColor)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 4)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
 
             if archivedTaskCount > 0 {
                 Button(action: { showArchived.toggle() }) {
@@ -135,6 +145,32 @@ struct TaskList: View {
 
     private func deleteTasks(offsets: IndexSet) {
         for index in offsets { deleteTask(projectTasks[index]) }
+    }
+
+    private func defaultQuickTaskName() -> String {
+        "Untitled Task \(Self.dateFormatter.string(from: Date()))"
+    }
+
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm"
+        return f
+    }()
+
+    private func createQuickTask() {
+        let name = defaultQuickTaskName()
+        let task = AgentTask(
+            id: UUID(),
+            projectID: project.id,
+            name: name,
+            taskDescription: name,
+            command: appConfig.terminal.resolvedShell,
+            environment: [:],
+            workingDirectory: project.directoryURL,
+            status: .idle
+        )
+        appDatabase.insertTask(task)
+        selection = task
     }
 }
 
