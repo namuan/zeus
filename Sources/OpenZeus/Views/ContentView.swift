@@ -84,7 +84,7 @@ struct ContentView: View {
 
     private var splitView: some View {
         NavigationSplitView(columnVisibility: .constant(.all)) {
-            ProjectList(selection: $selectedProject, activeTask: selectedTask)
+            ProjectList(selection: $selectedProject, activeTaskID: selectedTask?.id)
                 .focused($focusedPanel, equals: .projects)
                 .navigationSplitViewColumnWidth(
                     min: CGFloat(appConfig.ui.projectListMinWidth),
