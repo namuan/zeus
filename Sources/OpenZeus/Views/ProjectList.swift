@@ -5,7 +5,7 @@ struct ProjectList: View {
     @EnvironmentObject private var appDatabase: AppDatabase
     @EnvironmentObject private var terminalStore: TerminalStore
     @Binding var selection: Project?
-    let activeTask: AgentTask?
+    let activeTaskID: UUID?
 
     @State private var projectToDelete: Project?
     @State private var searchText = ""
@@ -29,6 +29,7 @@ struct ProjectList: View {
 
     var body: some View {
         List {
+            let activeTask = activeTaskID.flatMap { appDatabase.task(id: $0) }
             ForEach(filteredProjects) { project in
                     ProjectRow(
                         project: project,
