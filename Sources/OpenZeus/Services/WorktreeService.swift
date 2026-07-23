@@ -7,6 +7,13 @@ struct WorktreeResult: Sendable {
     let branch: String
 }
 
+struct WorktreeRequest: Sendable {
+    let taskID: UUID
+    let taskName: String
+    let repoPath: String
+    let projectSlug: String
+}
+
 enum WorktreeError: LocalizedError {
     case notConfigured
     case gitCommandFailed(String)
@@ -24,6 +31,15 @@ enum WorktreeError: LocalizedError {
     }
 }
 
+// MARK: - Branch Source
+
+enum WorktreeBranchSource: Sendable {
+    /// Create a new branch. If name is empty, auto-generate one.
+    case newBranch(name: String)
+    /// Check out an existing branch into the worktree.
+    case existingBranch(String)
+}
+
 // MARK: - Service
 
 final class WorktreeService: Sendable {
@@ -37,21 +53,33 @@ final class WorktreeService: Sendable {
 
     /// Creates a git worktree for a task and returns its path and branch name.
     func createWorktree(
-        taskID: UUID,
-        taskName: String,
-        repoPath: String,
-        projectSlug: String,
+        request: WorktreeRequest,
         config: WorktreeConfig,
-        branchNameOverride: String = ""
+        branchSource: WorktreeBranchSource
     ) async throws -> WorktreeResult {
         let basePath = config.resolvedBasePath
         guard !basePath.isEmpty else { throw WorktreeError.notConfigured }
 
-        let branch = branchNameOverride.isEmpty
-            ? Self.branchName(for: taskID, taskName: taskName)
-            : branchNameOverride
-        let parentDir = "\(basePath)/\(projectSlug)"
-        let worktreePath = "\(parentDir)/\(taskID.uuidString)"
+        let parentDir = "\(basePath)/\(request.projectSlug)"
+        let worktreePath = "\(parentDir)/\(request.taskID.uuidString)"
+
+        let branch: String
+        let gitArgs: [String]
+
+        switch branchSource {
+        case .newBranch(let name):
+            branch = name.isEmpty
+                ? Self.branchName(for: request.taskID, taskName: request.taskName)
+                : name
+            gitArgs = ["worktree", "add", worktreePath, "-b", branch, config.defaultBaseBranch]
+
+        case .existingBranch(let branchName):
+            guard !branchName.isEmpty else {
+                throw WorktreeError.gitCommandFailed("No existing branch selected.")
+            }
+            branch = branchName
+            gitArgs = ["worktree", "add", worktreePath, branch]
+        }
 
         do {
             try FileManager.default.createDirectory(
@@ -63,10 +91,7 @@ final class WorktreeService: Sendable {
             throw WorktreeError.directoryCreationFailed(parentDir)
         }
 
-        let result = await runGit(
-            args: ["worktree", "add", worktreePath, "-b", branch, config.defaultBaseBranch],
-            in: repoPath
-        )
+        let result = await runGit(args: gitArgs, in: request.repoPath)
         guard result.success else {
             let detail = result.error.isEmpty ? result.output : result.error
             throw WorktreeError.gitCommandFailed(detail)
@@ -75,12 +100,50 @@ final class WorktreeService: Sendable {
         return WorktreeResult(path: worktreePath, branch: branch)
     }
 
-    /// Removes a worktree directory and deletes the associated branch.
-    func removeWorktree(worktreePath: String, repoPath: String, branchName: String) async {
+    /// Lists local branches that are not checked out in another worktree.
+    func listAvailableBranches(repoPath: String) async throws -> [String] {
+        async let branchesResult = runGit(
+            args: ["for-each-ref", "--sort=-committerdate", "refs/heads/", "--format=%(refname:short)"],
+            in: repoPath
+        )
+        async let worktreesResult = runGit(args: ["worktree", "list", "--porcelain"], in: repoPath)
+        let (branches, worktrees) = await (branchesResult, worktreesResult)
+
+        guard branches.success else {
+            let detail = branches.error.isEmpty ? branches.output : branches.error
+            throw WorktreeError.gitCommandFailed(detail)
+        }
+        guard worktrees.success else {
+            let detail = worktrees.error.isEmpty ? worktrees.output : worktrees.error
+            throw WorktreeError.gitCommandFailed(detail)
+        }
+
+        let branchPrefix = "branch refs/heads/"
+        let checkedOutBranches: Set<String> = Set(worktrees.output.split(separator: "\n").compactMap { line in
+            guard line.hasPrefix(branchPrefix) else { return nil }
+            return String(line.dropFirst(branchPrefix.count))
+        })
+        return branches.output
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !checkedOutBranches.contains($0) }
+    }
+
+    /// Removes a worktree directory and its branch when the app created that branch.
+    func removeWorktree(
+        worktreePath: String,
+        repoPath: String,
+        branchName: String,
+        deleteBranch: Bool
+    ) async {
         _ = await runGit(args: ["worktree", "remove", "--force", worktreePath], in: repoPath)
-        async let branchDel = runGit(args: ["branch", "-d", branchName], in: repoPath)
         async let prune = runGit(args: ["worktree", "prune"], in: repoPath)
-        _ = await (branchDel, prune)
+        if deleteBranch {
+            async let branchDelete = runGit(args: ["branch", "-d", branchName], in: repoPath)
+            _ = await (branchDelete, prune)
+        } else {
+            _ = await prune
+        }
     }
 
     // MARK: - Naming Helpers

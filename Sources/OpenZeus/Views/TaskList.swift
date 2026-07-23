@@ -138,7 +138,8 @@ struct TaskList: View {
             await service.removeWorktree(
                 worktreePath: worktreePath,
                 repoPath: repoPath,
-                branchName: worktreeBranch
+                branchName: worktreeBranch,
+                deleteBranch: task.worktreeBranchIsOwned
             )
         }
     }
@@ -187,6 +188,11 @@ struct NewTaskSheet: View {
     @State private var branchNameOverride = ""
     @State private var isCreatingWorktree = false
     @State private var worktreeErrorMessage: String?
+    @State private var useExistingBranch = false
+    @State private var existingBranches: [String] = []
+    @State private var selectedExistingBranch = ""
+    @State private var branchesLoading = false
+    @State private var branchesError: String?
 
     private static let placeholder = "Task title…\n\nTask description…"
 
@@ -238,10 +244,46 @@ struct NewTaskSheet: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             if createWorktree && worktreeConfigured {
-                TextField(branchPlaceholder, text: $branchNameOverride)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.body, design: .monospaced))
-                    .frame(maxWidth: .infinity)
+                Picker("Branch", selection: $useExistingBranch) {
+                    Text("New").tag(false)
+                    Text("Existing").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: .infinity)
+
+                if useExistingBranch {
+                    if branchesLoading {
+                        HStack {
+                            ProgressView().controlSize(.small)
+                            Text("Loading branches...")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    } else if let error = branchesError {
+                        Text(error)
+                            .foregroundStyle(.red)
+                            .font(.caption)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else if existingBranches.isEmpty {
+                        Text("No available branches found in repository.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        Picker("Select branch", selection: $selectedExistingBranch) {
+                            ForEach(existingBranches, id: \.self) { branch in
+                                Text(branch).tag(branch)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                } else {
+                    TextField(branchPlaceholder, text: $branchNameOverride)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(maxWidth: .infinity)
+                }
             }
 
             if let errorMessage = worktreeErrorMessage {
@@ -262,7 +304,7 @@ struct NewTaskSheet: View {
                 }
                 Button("Save") { save() }
                     .keyboardShortcut(.return, modifiers: .command)
-                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isCreatingWorktree)
+                    .disabled(!canSave)
             }
         }
         .padding(24)
@@ -270,6 +312,36 @@ struct NewTaskSheet: View {
         .onAppear {
             createWorktree = worktreeConfigured && appConfig.worktree.createByDefault
         }
+        .task(id: createWorktree && useExistingBranch) {
+            guard createWorktree && useExistingBranch else { return }
+            await loadBranches()
+        }
+    }
+
+    private var canSave: Bool {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !isCreatingWorktree else {
+            return false
+        }
+        guard createWorktree && useExistingBranch else { return true }
+        return !branchesLoading && branchesError == nil && !selectedExistingBranch.isEmpty
+    }
+
+    private func loadBranches() async {
+        branchesLoading = true
+        branchesError = nil
+        let repoPath = project.directoryURL.path(percentEncoded: false)
+        let service = WorktreeService(gitExecutablePath: appConfig.git.executablePath)
+        do {
+            let branches = try await service.listAvailableBranches(repoPath: repoPath)
+            existingBranches = branches
+            if selectedExistingBranch.isEmpty, let first = branches.first {
+                selectedExistingBranch = first
+            }
+        } catch {
+            branchesError = error.localizedDescription
+            existingBranches = []
+        }
+        branchesLoading = false
     }
 
     private func save() {
@@ -294,26 +366,35 @@ struct NewTaskSheet: View {
 
         worktreeErrorMessage = nil
         isCreatingWorktree = true
-        let taskID = task.id
-        let taskName = task.name
-        let repoPath = project.directoryURL.path(percentEncoded: false)
-        let projectSlug = WorktreeService.projectSlug(from: project.name)
+        let worktreeRequest = WorktreeRequest(
+            taskID: task.id,
+            taskName: task.name,
+            repoPath: project.directoryURL.path(percentEncoded: false),
+            projectSlug: WorktreeService.projectSlug(from: project.name)
+        )
         let worktreeConfig = appConfig.worktree
         let service = WorktreeService(gitExecutablePath: appConfig.git.executablePath)
         let branchOverride = branchNameOverride.trimmingCharacters(in: .whitespacesAndNewlines)
+        let branchSource: WorktreeBranchSource
+        let branchIsOwned: Bool
+        if useExistingBranch {
+            branchSource = .existingBranch(selectedExistingBranch)
+            branchIsOwned = false
+        } else {
+            branchSource = .newBranch(name: branchOverride)
+            branchIsOwned = true
+        }
         Task { @MainActor in
             do {
                 let result = try await service.createWorktree(
-                    taskID: taskID,
-                    taskName: taskName,
-                    repoPath: repoPath,
-                    projectSlug: projectSlug,
+                    request: worktreeRequest,
                     config: worktreeConfig,
-                    branchNameOverride: branchOverride
+                    branchSource: branchSource
                 )
-                if var updated = appDatabase.task(id: taskID) {
+                if var updated = appDatabase.task(id: task.id) {
                     updated.worktreePath = result.path
                     updated.worktreeBranch = result.branch
+                    updated.worktreeBranchIsOwned = branchIsOwned
                     appDatabase.updateTask(updated)
                     task = updated
                 }
