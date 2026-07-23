@@ -181,6 +181,7 @@ import Testing
     #expect(!applied.contains("v10"))
     #expect(applied.contains("v1"))
     #expect(applied.contains("v8"))
+    #expect(applied.contains("v14"))
 }
 
 @Test @MainActor func savedCommandsPersistAcrossDatabaseRestart() throws {

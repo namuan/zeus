@@ -120,6 +120,11 @@ final class AppDatabase: ObservableObject {
                 t.add(column: "notes", .text)
             }
         }
+        migrator.registerMigration("v14") { db in
+            try db.alter(table: "tasks") { t in
+                t.add(column: "worktreeBranchIsOwned", .integer).notNull().defaults(to: 1)
+            }
+        }
         try migrator.migrate(db)
         // Remove stale records left by abandoned-branch migrations (v5, v9, v10).
         // These were never part of the canonical schema; deleting them keeps

@@ -15,6 +15,7 @@ struct AgentTask: Identifiable {
     var isArchived: Bool = false
     var worktreePath: String?
     var worktreeBranch: String?
+    var worktreeBranchIsOwned: Bool = true
     var notes: String?
 
     /// The directory the terminal should open in.
@@ -49,6 +50,7 @@ extension AgentTask: FetchableRecord {
         isArchived = (row["isArchived"] as? Int64 ?? 0) != 0
         worktreePath = row["worktreePath"]
         worktreeBranch = row["worktreeBranch"]
+        worktreeBranchIsOwned = (row["worktreeBranchIsOwned"] as? Int64 ?? 1) != 0
         notes = row["notes"]
     }
 }
@@ -75,6 +77,7 @@ extension AgentTask: PersistableRecord {
         container["isArchived"] = isArchived ? 1 : 0
         container["worktreePath"] = worktreePath
         container["worktreeBranch"] = worktreeBranch
+        container["worktreeBranchIsOwned"] = worktreeBranchIsOwned ? 1 : 0
         container["notes"] = notes
     }
 }

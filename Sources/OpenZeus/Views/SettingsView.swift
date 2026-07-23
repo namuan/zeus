@@ -505,7 +505,12 @@ private struct WorktreeTab: View {
             guard let path = task.worktreePath, let branch = task.worktreeBranch else { break }
             let repoPath = task.workingDirectory.path(percentEncoded: false)
             let service = WorktreeService(gitExecutablePath: gitExecutablePath)
-            await service.removeWorktree(worktreePath: path, repoPath: repoPath, branchName: branch)
+            await service.removeWorktree(
+                worktreePath: path,
+                repoPath: repoPath,
+                branchName: branch,
+                deleteBranch: task.worktreeBranchIsOwned
+            )
             var updated = task
             updated.worktreePath = nil
             updated.worktreeBranch = nil
