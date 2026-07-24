@@ -14,6 +14,22 @@ struct WorktreeRequest: Sendable {
     let projectSlug: String
 }
 
+struct WorktreeBranchOption: Identifiable, Sendable {
+    enum Kind: Sendable { case local, remote }
+    let id: String
+    let name: String
+    let kind: Kind
+    let localName: String
+    let presentLocally: Bool
+    let checkedOutElsewhere: Bool
+    var isAvailable: Bool {
+        switch kind {
+        case .local: return !checkedOutElsewhere
+        case .remote: return !presentLocally || !checkedOutElsewhere
+        }
+    }
+}
+
 enum WorktreeError: LocalizedError {
     case notConfigured
     case gitCommandFailed(String)
@@ -38,6 +54,8 @@ enum WorktreeBranchSource: Sendable {
     case newBranch(name: String)
     /// Check out an existing branch into the worktree.
     case existingBranch(String)
+    /// Check out a remote-tracking branch. Creates a local tracking branch when absent.
+    case remoteBranch(ref: String, localName: String, presentLocally: Bool)
 }
 
 // MARK: - Service
@@ -79,6 +97,12 @@ final class WorktreeService: Sendable {
             }
             branch = branchName
             gitArgs = ["worktree", "add", worktreePath, branch]
+
+        case .remoteBranch(let ref, let localName, let presentLocally):
+            branch = localName
+            gitArgs = presentLocally
+                ? ["worktree", "add", worktreePath, localName]
+                : ["worktree", "add", worktreePath, "-b", localName, ref]
         }
 
         do {
@@ -100,17 +124,25 @@ final class WorktreeService: Sendable {
         return WorktreeResult(path: worktreePath, branch: branch)
     }
 
-    /// Lists local branches that are not checked out in another worktree.
-    func listAvailableBranches(repoPath: String) async throws -> [String] {
-        async let branchesResult = runGit(
+    /// Lists local and remote-tracking branches that can be used for a new worktree.
+    func listBranchOptions(repoPath: String) async throws -> [WorktreeBranchOption] {
+        async let localResult = runGit(
             args: ["for-each-ref", "--sort=-committerdate", "refs/heads/", "--format=%(refname:short)"],
             in: repoPath
         )
+        async let remoteResult = runGit(
+            args: ["for-each-ref", "--sort=-committerdate", "refs/remotes/", "--format=%(refname:short)"],
+            in: repoPath
+        )
         async let worktreesResult = runGit(args: ["worktree", "list", "--porcelain"], in: repoPath)
-        let (branches, worktrees) = await (branchesResult, worktreesResult)
+        let (local, remote, worktrees) = await (localResult, remoteResult, worktreesResult)
 
-        guard branches.success else {
-            let detail = branches.error.isEmpty ? branches.output : branches.error
+        guard local.success else {
+            let detail = local.error.isEmpty ? local.output : local.error
+            throw WorktreeError.gitCommandFailed(detail)
+        }
+        guard remote.success else {
+            let detail = remote.error.isEmpty ? remote.output : remote.error
             throw WorktreeError.gitCommandFailed(detail)
         }
         guard worktrees.success else {
@@ -123,10 +155,53 @@ final class WorktreeService: Sendable {
             guard line.hasPrefix(branchPrefix) else { return nil }
             return String(line.dropFirst(branchPrefix.count))
         })
-        return branches.output
+
+        let localBranches = local.output
             .split(separator: "\n")
             .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty && !checkedOutBranches.contains($0) }
+            .filter { !$0.isEmpty }
+
+        let localBranchSet: Set<String> = Set(localBranches)
+
+        let localOptions: [WorktreeBranchOption] = localBranches.map { name in
+            WorktreeBranchOption(
+                id: "local:\(name)",
+                name: name,
+                kind: .local,
+                localName: name,
+                presentLocally: true,
+                checkedOutElsewhere: checkedOutBranches.contains(name)
+            )
+        }
+
+        let remoteBranches = remote.output
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && $0.contains("/") && !$0.hasSuffix("/HEAD") }
+
+        let remoteOptions: [WorktreeBranchOption] = remoteBranches.map { name in
+            let localName = name.remoteBranchLocalName
+            let presentLocally = localBranchSet.contains(localName)
+            return WorktreeBranchOption(
+                id: "remote:\(name)",
+                name: name,
+                kind: .remote,
+                localName: localName,
+                presentLocally: presentLocally,
+                checkedOutElsewhere: presentLocally && checkedOutBranches.contains(localName)
+            )
+        }
+
+        return remoteOptions + localOptions.filter(\.isAvailable)
+    }
+
+    /// Fetches remote-tracking refs from the default remote via `git fetch --prune`.
+    func fetchRemotes(repoPath: String) async throws {
+        let result = await runGit(args: ["fetch", "--prune"], in: repoPath)
+        guard result.success else {
+            let detail = result.error.isEmpty ? result.output : result.error
+            throw WorktreeError.gitCommandFailed(detail)
+        }
     }
 
     /// Removes a worktree directory and its branch when the app created that branch.
@@ -172,5 +247,12 @@ final class WorktreeService: Sendable {
 
     private func runGit(args: [String], in workingDirectory: String) async -> GitCommandResult {
         await runGitCommand(args: args, in: workingDirectory, executablePath: gitExecutablePath)
+    }
+}
+
+private extension String {
+    var remoteBranchLocalName: String {
+        guard let slashIndex = firstIndex(of: "/") else { return self }
+        return String(self[index(after: slashIndex)...])
     }
 }

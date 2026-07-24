@@ -189,8 +189,8 @@ struct NewTaskSheet: View {
     @State private var isCreatingWorktree = false
     @State private var worktreeErrorMessage: String?
     @State private var useExistingBranch = false
-    @State private var existingBranches: [String] = []
-    @State private var selectedExistingBranch = ""
+    @State private var branchOptions: [WorktreeBranchOption] = []
+    @State private var selectedBranchID = ""
     @State private var branchesLoading = false
     @State private var branchesError: String?
 
@@ -265,16 +265,34 @@ struct NewTaskSheet: View {
                             .foregroundStyle(.red)
                             .font(.caption)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                    } else if existingBranches.isEmpty {
+                    } else if branchOptions.isEmpty {
                         Text("No available branches found in repository.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
-                        Picker("Select branch", selection: $selectedExistingBranch) {
-                            ForEach(existingBranches, id: \.self) { branch in
-                                Text(branch).tag(branch)
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Select branch")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Button {
+                                    Task { await refreshBranches() }
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "arrow.clockwise")
+                                        Text("Refresh")
+                                    }
+                                    .font(.caption)
+                                }
+                                .disabled(branchesLoading)
                             }
+                            List(branchOptions, id: \.id, selection: $selectedBranchID) { option in
+                                BranchRow(option: option)
+                                    .tag(option.id)
+                            }
+                            .frame(height: 160)
                         }
                         .frame(maxWidth: .infinity)
                     }
@@ -323,7 +341,9 @@ struct NewTaskSheet: View {
             return false
         }
         guard createWorktree && useExistingBranch else { return true }
-        return !branchesLoading && branchesError == nil && !selectedExistingBranch.isEmpty
+        guard !branchesLoading, branchesError == nil else { return false }
+        guard let opt = branchOptions.first(where: { $0.id == selectedBranchID }) else { return false }
+        return opt.isAvailable
     }
 
     private func loadBranches() async {
@@ -332,16 +352,35 @@ struct NewTaskSheet: View {
         let repoPath = project.directoryURL.path(percentEncoded: false)
         let service = WorktreeService(gitExecutablePath: appConfig.git.executablePath)
         do {
-            let branches = try await service.listAvailableBranches(repoPath: repoPath)
-            existingBranches = branches
-            if selectedExistingBranch.isEmpty, let first = branches.first {
-                selectedExistingBranch = first
+            let options = try await service.listBranchOptions(repoPath: repoPath)
+            let defaultBase = appConfig.worktree.defaultBaseBranch
+            branchOptions = options.filter { opt in
+                opt.kind != .remote || opt.localName != defaultBase
+            }
+            if selectedBranchID.isEmpty || !branchOptions.contains(where: { $0.id == selectedBranchID && $0.isAvailable }),
+               let first = branchOptions.first(where: \.isAvailable) {
+                selectedBranchID = first.id
             }
         } catch {
             branchesError = error.localizedDescription
-            existingBranches = []
+            branchOptions = []
         }
         branchesLoading = false
+    }
+
+    private func refreshBranches() async {
+        branchesLoading = true
+        branchesError = nil
+        let repoPath = project.directoryURL.path(percentEncoded: false)
+        let service = WorktreeService(gitExecutablePath: appConfig.git.executablePath)
+        do {
+            try await service.fetchRemotes(repoPath: repoPath)
+        } catch {
+            branchesError = error.localizedDescription
+            branchesLoading = false
+            return
+        }
+        await loadBranches()
     }
 
     private func save() {
@@ -378,8 +417,15 @@ struct NewTaskSheet: View {
         let branchSource: WorktreeBranchSource
         let branchIsOwned: Bool
         if useExistingBranch {
-            branchSource = .existingBranch(selectedExistingBranch)
-            branchIsOwned = false
+            guard let opt = branchOptions.first(where: { $0.id == selectedBranchID }) else { return }
+            switch opt.kind {
+            case .local, .remote where opt.presentLocally:
+                branchSource = .existingBranch(opt.localName)
+                branchIsOwned = false
+            case .remote:
+                branchSource = .remoteBranch(ref: opt.name, localName: opt.localName, presentLocally: false)
+                branchIsOwned = true
+            }
         } else {
             branchSource = .newBranch(name: branchOverride)
             branchIsOwned = true
@@ -405,6 +451,38 @@ struct NewTaskSheet: View {
                 worktreeErrorMessage = error.localizedDescription
             }
         }
+    }
+}
+
+private struct BranchRow: View {
+    let option: WorktreeBranchOption
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: option.kind == .local ? "arrow.triangle.branch" : "cloud")
+                .foregroundStyle(option.kind == .remote ? .blue : .primary)
+                .frame(width: 16)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(option.name)
+                    .font(.body)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(subtitleColor)
+            }
+        }
+        .opacity(option.isAvailable ? 1 : 0.5)
+    }
+
+    private var subtitle: String {
+        switch option.kind {
+        case .local: return "local"
+        case .remote where option.presentLocally: return "remote · local copy exists"
+        case .remote: return "remote · creates local branch"
+        }
+    }
+
+    private var subtitleColor: Color {
+        option.kind == .remote && !option.presentLocally ? .orange : .secondary
     }
 }
 
