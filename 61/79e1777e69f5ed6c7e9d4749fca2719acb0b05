@@ -1,0 +1,1 @@
+Add -c workingDirectory flag to tmux new-session command so the session starts in the correct project directory instead of the default path
