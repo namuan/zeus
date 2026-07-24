@@ -1280,7 +1280,7 @@ private struct TerminalRepresentable: NSViewRepresentable {
             logInfo("TerminalRepresentable.updateNSView: starting tmux session '\(sessionName)'")
             terminalView.startProcess(
                 executable: tmux,
-                args: ["new-session", "-A", "-s", sessionName, shell, "-l"],
+                args: ["new-session", "-A", "-c", workingDirectory, "-s", sessionName, shell, "-l"],
                 currentDirectory: workingDirectory
             )
             Task {
