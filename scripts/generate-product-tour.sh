@@ -46,11 +46,11 @@ if [ ! -f "$FONT" ]; then
   done
 fi
 
-# --- Capture ----------------------------------------------------------------
-echo "Activating $APP_NAME..."
-osascript -e "tell application \"${APP_NAME}\" to activate" >/dev/null 2>&1 || true
-sleep 1
+# --- Window position offset -------------------------------------------------
+SOURCE="$TOUR_DIR/source.png"
+SKIP_CAPTURE="${SKIP_CAPTURE:-0}"
 
+# Read the live window position so annotations track if the user moved it.
 POS="$(osascript -e "tell application \"System Events\" to tell process \"${APP_NAME}\" to get position of window 1" 2>/dev/null || echo "{$DEFX, $DEFY}")"
 WX="$(echo "$POS" | tr -d '{}' | cut -d, -f1 | tr -d ' ')"
 WY="$(echo "$POS" | tr -d '{}' | cut -d, -f2 | tr -d ' ')"
@@ -59,14 +59,25 @@ DX=$(( WX * SCALE - DEFX * SCALE ))
 DY=$(( WY * SCALE - DEFY * SCALE ))
 echo "Window at logical ($WX,$WY); annotation offset = ($DX,$DY) px"
 
-SOURCE="$TOUR_DIR/source.png"
-echo "Capturing screenshot -> $SOURCE"
-screencapture -x "$SOURCE"
+# --- Capture ----------------------------------------------------------------
+if [ "$SKIP_CAPTURE" = "1" ]; then
+  echo "Skipping capture (SKIP_CAPTURE=1), using existing source.png"
+else
+  echo "Activating $APP_NAME..."
+  osascript -e "tell application \"${APP_NAME}\" to activate" >/dev/null 2>&1 || true
+  sleep 1
+  echo "Capturing screenshot -> $SOURCE"
+  screencapture -x "$SOURCE"
+fi
 
 # --- Render features --------------------------------------------------------
 echo "Rendering feature shots..."
 
-jq -c '.features[]' "$CFG" | while read -r feat; do
+size=$(magick identify -format "%w %h" "$SOURCE")
+SW=${size% *}
+SH=${size#* }
+
+while read -r feat; do
   file="$(echo "$feat" | jq -r '.file')"
   col="$(echo "$feat"  | jq -r '.color')"
   x="$(echo "$feat"    | jq -r '.x')"
@@ -77,14 +88,24 @@ jq -c '.features[]' "$CFG" | while read -r feat; do
   x1=$(( x + DX )); y1=$(( y + DY ))
   x2=$(( x + w + DX )); y2=$(( y + h + DY ))
   tmp="$(mktemp "${TMPDIR:-/tmp}/pt.XXXXXX.png")"
+  mask_tmp="$(mktemp "${TMPDIR:-/tmp}/pt.mask.XXXXXX.png")"
+  dimmed_tmp="$(mktemp "${TMPDIR:-/tmp}/pt.dim.XXXXXX.png")"
+  # Draw the annotation rectangle on the source
   magick "$SOURCE" -stroke "$col" -strokewidth 10 -fill none \
     -draw "rectangle $x1,$y1 $x2,$y2" "$tmp"
+  # Dim outside the rectangle: create a dimmed clone + an inverted rectangle mask,
+  # then composite so only the outside area is dimmed
+  DIM_OPACITY="${DIM_OPACITY:-0.55}"
+  magick "$SOURCE" -fill "rgba(0,0,0,$DIM_OPACITY)" -draw 'color 0,0 reset' "$dimmed_tmp"
+  magick -size ${SW}x${SH} xc:black -fill white -draw "rectangle $x1,$y1 $x2,$y2" -negate -alpha Copy "$mask_tmp"
+  magick "$tmp" "$dimmed_tmp" "$mask_tmp" -composite "$tmp"
+  rm -f "$dimmed_tmp" "$mask_tmp"
   magick -size "${SCREEN_W}x${BH}" -background 'rgba(28,28,30,0.85)' -fill white \
     -font "$FONT" -pointsize "$FS" -gravity Center caption:"$desc" "${tmp}.banner.png"
   magick "$tmp" "${tmp}.banner.png" -gravity South -composite "$TOUR_DIR/$file.png"
   rm -f "$tmp" "${tmp}.banner.png"
   echo "  wrote $file.png"
-done
+done < <(jq -c '.features[]' "$CFG")
 
 # --- Optimize for web -------------------------------------------------------
 echo "Optimizing images for web..."
