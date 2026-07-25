@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Product Tour Annotation Editor</title>
+<style>
+  :root { --bg:#1c1c1e; --panel:#26262a; --fg:#f2f2f2; --muted:#9a9aa0; --accent:#0a84ff; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.4 -apple-system, system-ui, sans-serif; background:var(--bg); color:var(--fg); display:flex; flex-direction:column; height:100vh; }
+  header { display:flex; gap:8px; align-items:center; padding:10px 14px; background:var(--panel); border-bottom:1px solid #000; flex-wrap:wrap; }
+  header button { background:var(--accent); color:#fff; border:0; padding:8px 12px; border-radius:6px; cursor:pointer; font-size:13px; }
+  header button.secondary { background:#3a3a3e; }
+  #status { color:var(--muted); margin-left:auto; font-size:12px; }
+  main { display:flex; flex:1; min-height:0; }
+  #canvasWrap { flex:1; overflow:auto; padding:16px; display:flex; align-items:center; justify-content:center; background:#111; position:relative; }
+  canvas { max-width:100%; max-height:100%; box-shadow:0 0 0 1px #000; cursor:crosshair; }
+  aside { width:340px; background:var(--panel); border-left:1px solid #000; display:flex; flex-direction:column; min-height:0; }
+  aside h3 { margin:0; padding:12px 14px; border-bottom:1px solid #000; font-size:13px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); }
+  #featList { list-style:none; margin:0; padding:6px; overflow:auto; max-height:38%; }
+  #featList li { padding:7px 10px; border-radius:6px; cursor:pointer; display:flex; align-items:center; gap:8px; }
+  #featList li:hover { background:#33333a; }
+  #featList li.sel { background:var(--accent); }
+  #featList .swatch { width:12px; height:12px; border-radius:3px; flex:none; }
+  #featList .name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #editor { padding:12px 14px; border-top:1px solid #000; overflow:auto; display:flex; flex-direction:column; gap:8px; }
+  #editor label { display:flex; flex-direction:column; gap:3px; font-size:12px; color:var(--muted); }
+  #editor input, #editor textarea { background:#1c1c1e; color:var(--fg); border:1px solid #3a3a3e; border-radius:5px; padding:6px 8px; font:inherit; }
+  #editor textarea { min-height:64px; resize:vertical; }
+  .row { display:flex; gap:8px; }
+  .row > label { flex:1; }
+  #editor button { background:#3a3a3e; color:#fff; border:0; padding:8px; border-radius:6px; cursor:pointer; }
+  .hint { color:var(--muted); font-size:11px; padding:0 14px 10px; }
+</style>
+</head>
+<body>
+<header>
+  <button id="loadImg" class="secondary">Load screenshot…</button>
+  <button id="loadJson" class="secondary">Load annotations.json…</button>
+  <button id="saveJson">Save annotations.json</button>
+  <button id="addBox" class="secondary">+ Add feature</button>
+  <span id="status">Open this file from the product-tour folder, or use the buttons to load.</span>
+</header>
+<main>
+  <div id="canvasWrap">
+    <canvas id="cv" width="10" height="10"></canvas>
+  </div>
+  <aside>
+    <h3>Features</h3>
+    <ul id="featList"></ul>
+    <div id="editor">
+      <label>Title<input id="fTitle"></label>
+      <label>File (no .png)<input id="fFile"></label>
+      <label>Color<input id="fColor" type="color" value="#FF3B30"></label>
+      <div class="row">
+        <label>X<input id="fX" type="number"></label>
+        <label>Y<input id="fY" type="number"></label>
+      </div>
+      <div class="row">
+        <label>W<input id="fW" type="number"></label>
+        <label>H<input id="fH" type="number"></label>
+      </div>
+      <label>Description<textarea id="fDesc"></textarea></label>
+      <button id="delBox">Delete feature</button>
+    </div>
+    <p class="hint">After saving, re-run <code>bash scripts/generate-product-tour.sh</code> to render the PNGs.</p>
+  </aside>
+</main>
+
+<input type="file" id="imgInput" accept="image/*" hidden>
+<input type="file" id="jsonInput" accept="application/json,.json" hidden>
+
+<script>
+"use strict";
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const statusEl = document.getElementById('status');
+const featList = document.getElementById('featList');
+
+const state = { img: null, ann: null, sel: -1 };
+const HANDLE = 9;
+const DEFAULTS = {
+  appName: "MyApp", defaultWinX: 0, defaultWinY: 39,
+  scale: 2, screenWidth: 3600, bannerHeight: 260, fontSize: 60,
+  font: "/System/Library/Fonts/Helvetica.ttc"
+};
+
+function setStatus(t){ statusEl.textContent = t; }
+function toImg(e){
+  const r = cv.getBoundingClientRect();
+  return { x:(e.clientX-r.left)*(cv.width/r.width), y:(e.clientY-r.top)*(cv.height/r.height) };
+}
+
+function corners(f){
+  return [[f.x,f.y],[f.x+f.width,f.y],[f.x,f.y+f.height],[f.x+f.width,f.y+f.height]];
+}
+function wrapText(ctx, text, maxWidth){
+  const words = text.split(' ');
+  const lines = []; let line = '';
+  for(const w of words){
+    const test = line ? line + ' ' + w : w;
+    if(ctx.measureText(test).width > maxWidth && line){
+      lines.push(line); line = w;
+    } else { line = test; }
+  }
+  if(line) lines.push(line);
+  return lines;
+}
+
+function render(){
+  ctx.clearRect(0,0,cv.width,cv.height);
+  if(state.img){ cv.width = state.img.naturalWidth; cv.height = state.img.naturalHeight; ctx.drawImage(state.img,0,0,cv.width,cv.height); }
+  else { cv.width = 800; cv.height = 500; ctx.fillStyle="#222"; ctx.fillRect(0,0,cv.width,cv.height); }
+  if(!state.ann) return;
+  if(state.sel >= 0){
+  const f = state.ann.features[state.sel];
+  if(f){
+    ctx.lineWidth = 10;
+    ctx.strokeStyle = f.color || "#FF3B30";
+    ctx.strokeRect(f.x, f.y, f.width, f.height);
+    ctx.fillStyle = f.color || "#FF3B30";
+    ctx.font = "bold 44px sans-serif";
+    ctx.fillText(String(state.sel+1), f.x+6, f.y-10);
+    // corner handles
+    ctx.fillStyle = "#fff";
+    for(const [hx,hy] of corners(f)){
+      ctx.fillRect(hx-HANDLE/2, hy-HANDLE/2, HANDLE, HANDLE);
+    }
+    // bottom banner with description
+    if(f.desc){
+      const BH = 260;
+      const barY = cv.height - BH;
+      ctx.fillStyle = "rgba(28,28,30,0.85)";
+      ctx.fillRect(0, barY, cv.width, BH);
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 60px sans-serif";
+      ctx.textAlign = "center";
+      const pad = 60;
+      const maxW = cv.width - pad * 2;
+      const lines = wrapText(ctx, f.desc, maxW);
+      const lineH = 72;
+      const totalH = lines.length * lineH;
+      const startY = barY + (BH - totalH) / 2 + lineH * 0.8;
+      lines.forEach((line, i) => {
+        ctx.fillText(line, cv.width / 2, startY + i * lineH);
+      });
+      ctx.textAlign = "start";
+    }
+  }
+  }
+}
+
+function refreshList(){
+  featList.innerHTML = "";
+  if(!state.ann) return;
+  state.ann.features.forEach((f,i)=>{
+    const li = document.createElement('li');
+    if(i===state.sel) li.className = 'sel';
+    li.innerHTML = `<span class="swatch" style="background:${f.color||'#FF3B30'}"></span><span class="name">${(i+1)}. ${escapeHtml(f.title||f.file)}</span>`;
+    li.onclick = ()=> { state.sel = i; refreshList(); fillEditor(); render(); };
+    featList.appendChild(li);
+  });
+}
+function escapeHtml(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function fillEditor(){
+  const f = state.ann && state.ann.features[state.sel];
+  if(!f){ ['fTitle','fFile','fColor','fX','fY','fW','fH','fDesc'].forEach(id=>document.getElementById(id).value=''); return; }
+  document.getElementById('fTitle').value = f.title||'';
+  document.getElementById('fFile').value = f.file||'';
+  document.getElementById('fColor').value = f.color||'#FF3B30';
+  document.getElementById('fX').value = Math.round(f.x);
+  document.getElementById('fY').value = Math.round(f.y);
+  document.getElementById('fW').value = Math.round(f.width);
+  document.getElementById('fH').value = Math.round(f.height);
+  document.getElementById('fDesc').value = f.desc||'';
+}
+
+['fTitle','fFile','fColor','fX','fY','fW','fH','fDesc'].forEach(id=>{
+  document.getElementById(id).addEventListener('input', e=>{
+    const f = state.ann && state.ann.features[state.sel];
+    if(!f) return;
+    const map = {fTitle:'title',fFile:'file',fColor:'color',fX:'x',fY:'y',fW:'width',fH:'height',fDesc:'desc'};
+    let v = e.target.value;
+    if(['x','y','width','height'].includes(map[id])) v = parseFloat(v)||0;
+    f[map[id]] = v;
+    render(); refreshList();
+  });
+});
+
+let drag = null;
+cv.addEventListener('mousedown', e=>{
+  if(!state.ann||!state.ann.features.length) return;
+  const p = toImg(e);
+  const r = cv.getBoundingClientRect();
+  const hs = HANDLE * (cv.width/r.width);
+  if(state.sel >= 0){
+    const f = state.ann.features[state.sel];
+    if(f){
+      const cs = corners(f);
+      for(let c=0;c<4;c++){
+        if(Math.abs(p.x-cs[c][0])<=hs && Math.abs(p.y-cs[c][1])<=hs){
+          drag = {mode:'resize', corner:c, i:state.sel, sx:p.x, sy:p.y, ox:f.x, oy:f.y, ow:f.width, oh:f.height};
+          return;
+        }
+      }
+      if(p.x>=f.x && p.x<=f.x+f.width && p.y>=f.y && p.y<=f.y+f.height){
+        drag = {mode:'move', i:state.sel, sx:p.x, sy:p.y, ox:f.x, oy:f.y};
+        return;
+      }
+    }
+  }
+  state.sel = -1; refreshList(); fillEditor(); render();
+});
+window.addEventListener('mousemove', e=>{
+  if(!drag) return;
+  const p = toImg(e);
+  const f = state.ann.features[drag.i];
+  if(drag.mode==='move'){
+    f.x = Math.round(drag.ox + (p.x-drag.sx));
+    f.y = Math.round(drag.oy + (p.y-drag.sy));
+  } else {
+    const dx = p.x-drag.sx, dy = p.y-drag.sy;
+    if(drag.corner===0){ f.x=drag.ox+dx; f.y=drag.oy+dy; f.width=drag.ow-dx; f.height=drag.oh-dy; }
+    if(drag.corner===1){ f.y=drag.oy+dy; f.width=drag.ow+dx; f.height=drag.oh-dy; }
+    if(drag.corner===2){ f.x=drag.ox+dx; f.width=drag.ow-dx; f.height=drag.oh+dy; }
+    if(drag.corner===3){ f.width=drag.ow+dx; f.height=drag.oh+dy; }
+    f.x=Math.round(f.x); f.y=Math.round(f.y); f.width=Math.round(Math.max(20,f.width)); f.height=Math.round(Math.max(20,f.height));
+  }
+  render(); syncEditorGeom(f);
+});
+window.addEventListener('mouseup', ()=>{ drag=null; });
+function syncEditorGeom(f){
+  document.getElementById('fX').value=Math.round(f.x);
+  document.getElementById('fY').value=Math.round(f.y);
+  document.getElementById('fW').value=Math.round(f.width);
+  document.getElementById('fH').value=Math.round(f.height);
+}
+
+function addFeature(extra){
+  if(!state.ann) state.ann = Object.assign({}, DEFAULTS, {features:[]});
+  const n = state.ann.features.length;
+  const palette = ["#FF3B30","#FF9500","#FFCC00","#34C759","#00C7BE","#30B0C7","#007AFF","#5856D6","#AF52DE","#FF2D55"];
+  state.ann.features.push(Object.assign({
+    file:"f"+(n+1).toString().padStart(2,'0')+"-feature",
+    title:"Feature "+(n+1),
+    color:palette[n%palette.length],
+    desc:"Describe this feature."
+  }, extra));
+  state.sel = state.ann.features.length-1; refreshList(); fillEditor(); render();
+}
+document.getElementById('addBox').onclick = ()=> addFeature({x:200,y:200,width:300,height:160});
+document.getElementById('delBox').onclick = ()=>{
+  if(state.sel<0) return;
+  state.ann.features.splice(state.sel,1);
+  state.sel = -1; refreshList(); fillEditor(); render();
+};
+
+document.getElementById('imgInput').addEventListener('change', e=>{
+  const file = e.target.files[0]; if(!file) return;
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = ()=>{ state.img = img; cv.width=img.naturalWidth; cv.height=img.naturalHeight; render(); setStatus('Screenshot loaded.'); };
+  img.src = url;
+});
+document.getElementById('jsonInput').addEventListener('change', e=>{
+  const file = e.target.files[0]; if(!file) return;
+  const r = new FileReader();
+  r.onload = ()=> loadJsonText(r.result);
+  r.readAsText(file);
+});
+function loadJsonText(txt){
+  try{
+    const obj = JSON.parse(txt);
+    if(!obj.features) obj.features = [];
+    state.ann = obj; state.sel = -1;
+    refreshList(); fillEditor(); render();
+    setStatus('annotations.json loaded ('+obj.features.length+' features).');
+  }catch(err){ setStatus('Invalid JSON: '+err.message); }
+}
+document.getElementById('loadImg').onclick = ()=> document.getElementById('imgInput').click();
+document.getElementById('loadJson').onclick = ()=> document.getElementById('jsonInput').click();
+document.getElementById('saveJson').onclick = ()=>{
+  if(!state.ann){ setStatus('Nothing to save — load or add features first.'); return; }
+  const data = JSON.stringify(state.ann, null, 2);
+  const blob = new Blob([data], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'annotations.json'; a.click();
+  URL.revokeObjectURL(a.href);
+  setStatus('Saved annotations.json ('+state.ann.features.length+' features).');
+};
+
+(async function auto(){
+  try{
+    const r = await fetch('./source.png');
+    if(r.ok){ const img=new Image(); img.onload=()=>{ state.img=img; cv.width=img.naturalWidth; cv.height=img.naturalHeight; render(); }; img.src=URL.createObjectURL(await r.blob()); setStatus('Screenshot auto-loaded.'); }
+  }catch(_){}
+  try{
+    const r = await fetch('./annotations.json');
+    if(r.ok){ loadJsonText(await r.text()); }
+  }catch(_){}
+})();
+</script>
+</body>
+</html>

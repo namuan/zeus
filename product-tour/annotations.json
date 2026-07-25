@@ -1,0 +1,112 @@
+{
+  "appName": "OpenZeus",
+  "defaultWinX": 0,
+  "defaultWinY": 39,
+  "scale": 2,
+  "screenWidth": 3600,
+  "bannerHeight": 260,
+  "fontSize": 60,
+  "font": "/System/Library/Fonts/Helvetica.ttc",
+  "features": [
+    {
+      "file": "f01-project-toolbar",
+      "title": "Project toolbar",
+      "color": "#FF3B30",
+      "x": 180,
+      "y": 78,
+      "width": 415,
+      "height": 107,
+      "desc": "Filter Active, Add from Clipboard, Add Project, Hide Sidebar."
+    },
+    {
+      "file": "f02-project-search",
+      "title": "Project search",
+      "color": "#FF9500",
+      "x": 36,
+      "y": 200,
+      "width": 518,
+      "height": 56,
+      "desc": "Filter the project list by name or folder path."
+    },
+    {
+      "file": "f03-project-list",
+      "title": "Project list",
+      "color": "#FFCC00",
+      "x": 0,
+      "y": 260,
+      "width": 572,
+      "height": 1583,
+      "desc": "Each project shows its name, path, open-task count, and a live running indicator. Right-click for Open in Finder / Terminal / Delete."
+    },
+    {
+      "file": "f04-tasks",
+      "title": "Tasks",
+      "color": "#34C759",
+      "x": 560,
+      "y": 197,
+      "width": 597,
+      "height": 340,
+      "desc": "Lists tasks for the selected project. New Task opens the create sheet; Quick Task starts one instantly."
+    },
+    {
+      "file": "f05-task-actions",
+      "title": "Task actions",
+      "color": "#00C7BE",
+      "x": 804,
+      "y": 255,
+      "width": 320,
+      "height": 80,
+      "desc": "Edit description, notes, copy, archive/complete, and a watch bell for notifications."
+    },
+    {
+      "file": "f06-window-controls",
+      "title": "Window & pane controls",
+      "color": "#30B0C7",
+      "x": 1152,
+      "y": 180,
+      "width": 416,
+      "height": 60,
+      "desc": "New / prev / next window, split (H/V), rotate, zoom, close, pop out to Terminal.app."
+    },
+    {
+      "file": "f07-quick-commands",
+      "title": "Quick Commands",
+      "color": "#007AFF",
+      "x": 1568,
+      "y": 186,
+      "width": 53,
+      "height": 46,
+      "desc": "The lightning button opens one-click saved shell commands (project or global)."
+    },
+    {
+      "file": "f08-git-status",
+      "title": "Git status bar",
+      "color": "#5856D6",
+      "x": 3201,
+      "y": 182,
+      "width": 303,
+      "height": 56,
+      "desc": "Branch, staged / unstaged / untracked counts, ahead-behind, Show changed files, Revert All."
+    },
+    {
+      "file": "f09-terminal",
+      "title": "Terminal",
+      "color": "#AF52DE",
+      "x": 1155,
+      "y": 285,
+      "width": 2433,
+      "height": 1985,
+      "desc": "Live, tmux-backed terminal for the selected task. Sessions survive app restarts."
+    },
+    {
+      "file": "f10-app-launcher",
+      "title": "App launcher",
+      "color": "#FF2D55",
+      "x": 1158,
+      "y": 239,
+      "width": 768,
+      "height": 53,
+      "desc": "Buttons that open supporting macOS apps inside the project directory."
+    }
+  ]
+}
