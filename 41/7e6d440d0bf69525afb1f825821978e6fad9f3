@@ -1,0 +1,1 @@
+Adds persisted System, Light, and Dark terminal themes with native SwiftTerm colours and settings UI. Extracts terminal appearance logic into a focused module to keep TerminalStore below 1,000 lines. Verified with swift test and SwiftLint.
