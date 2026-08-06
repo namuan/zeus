@@ -164,6 +164,12 @@ struct LLMConfig: Codable, Equatable, Sendable {
 
 // MARK: - Terminal
 
+enum TerminalTheme: String, CaseIterable, Codable, Sendable {
+    case system
+    case light
+    case dark
+}
+
 struct TerminalConfig: Codable, Equatable, Sendable {
     var pollIntervalSeconds: Double
     var tmuxSettleDelayMs: Int
@@ -175,6 +181,7 @@ struct TerminalConfig: Codable, Equatable, Sendable {
     var fontFamily: String
     var fontSize: Int
     var fontWeight: String
+    var theme: TerminalTheme
     var tmuxSearchPaths: [String]
     var pkillPath: String
     var tmuxSessionPrefix: String
@@ -191,6 +198,7 @@ struct TerminalConfig: Codable, Equatable, Sendable {
         fontFamily: String = "monospacedSystemFont",
         fontSize: Int = 13,
         fontWeight: String = "regular",
+        theme: TerminalTheme = .system,
         tmuxSearchPaths: [String] = ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"],
         pkillPath: String = "/usr/bin/pkill",
         tmuxSessionPrefix: String = "zeus-",
@@ -206,6 +214,7 @@ struct TerminalConfig: Codable, Equatable, Sendable {
         self.fontFamily = fontFamily
         self.fontSize = fontSize
         self.fontWeight = fontWeight
+        self.theme = theme
         self.tmuxSearchPaths = tmuxSearchPaths
         self.pkillPath = pkillPath
         self.tmuxSessionPrefix = tmuxSessionPrefix
@@ -225,6 +234,7 @@ struct TerminalConfig: Codable, Equatable, Sendable {
         fontFamily                 = (try? c.decode(String.self, forKey: .fontFamily))                 ?? d.fontFamily
         fontSize                   = (try? c.decode(Int.self, forKey: .fontSize))                   ?? d.fontSize
         fontWeight                 = (try? c.decode(String.self, forKey: .fontWeight))                 ?? d.fontWeight
+        theme                      = (try? c.decode(TerminalTheme.self, forKey: .theme))                ?? d.theme
         tmuxSearchPaths            = (try? c.decode([String].self, forKey: .tmuxSearchPaths))            ?? d.tmuxSearchPaths
         pkillPath                  = (try? c.decode(String.self, forKey: .pkillPath))                  ?? d.pkillPath
         tmuxSessionPrefix          = (try? c.decode(String.self, forKey: .tmuxSessionPrefix))          ?? d.tmuxSessionPrefix
