@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import OpenZeus
@@ -101,6 +102,27 @@ private func killTmuxSessionSync(_ tmux: String, sessionName: String) {
     #expect(entry.tmuxUnavailable == false)
     entry.tmuxUnavailable = true
     #expect(entry.tmuxUnavailable == true)
+}
+
+@Test @MainActor func terminalEntryAppliesExplicitThemes() {
+    let entry = TerminalEntry(taskID: UUID())
+
+    entry.applyTheme(.dark, systemColorScheme: .light)
+    #expect(abs(entry.terminalView.nativeBackgroundColor.redComponent - 13.0 / 255.0) < 0.000_001)
+    #expect(abs(entry.terminalView.nativeBackgroundColor.greenComponent - 17.0 / 255.0) < 0.000_001)
+    #expect(abs(entry.terminalView.nativeBackgroundColor.blueComponent - 23.0 / 255.0) < 0.000_001)
+    #expect(abs(entry.terminalView.nativeForegroundColor.redComponent - 230.0 / 255.0) < 0.000_001)
+
+    entry.applyTheme(.light, systemColorScheme: .dark)
+    #expect(entry.terminalView.nativeBackgroundColor.redComponent == 1.0)
+    #expect(entry.terminalView.nativeBackgroundColor.greenComponent == 1.0)
+    #expect(entry.terminalView.nativeBackgroundColor.blueComponent == 1.0)
+    #expect(abs(entry.terminalView.nativeForegroundColor.redComponent - 31.0 / 255.0) < 0.000_001)
+
+    entry.applyTheme(.system, systemColorScheme: .light)
+    let lightBackground = entry.terminalView.nativeBackgroundColor
+    entry.applyTheme(.system, systemColorScheme: .dark)
+    #expect(entry.terminalView.nativeBackgroundColor != lightBackground)
 }
 
 // MARK: - TerminalStore Tests

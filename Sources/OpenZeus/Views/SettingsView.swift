@@ -98,6 +98,19 @@ private struct TerminalTab: View {
                 }
             }
 
+            Section("Appearance") {
+                Picker("Theme", selection: $config.theme) {
+                    ForEach(TerminalTheme.allCases, id: \.self) { theme in
+                        Text(theme.displayName).tag(theme)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text("System follows the current macOS appearance.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Shell") {
                 TextField("Default shell (empty = $SHELL)", text: $config.defaultShell)
                     .help("Empty uses $SHELL, falling back to /bin/bash.")
@@ -128,6 +141,16 @@ private struct TerminalTab: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+private extension TerminalTheme {
+    var displayName: String {
+        switch self {
+        case .system: "System"
+        case .light: "Light"
+        case .dark: "Dark"
+        }
     }
 }
 

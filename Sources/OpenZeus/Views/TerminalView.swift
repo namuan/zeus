@@ -1232,6 +1232,7 @@ private struct TerminalRepresentable: NSViewRepresentable {
     let workingDirectory: String
     @ObservedObject var entry: TerminalEntry
     let terminalConfig: TerminalConfig
+    @Environment(\.colorScheme) private var colorScheme
 
     func makeNSView(context: Context) -> TerminalContainerView {
         logInfo("TerminalRepresentable.makeNSView: creating TerminalContainerView for session \(sessionID)")
@@ -1258,6 +1259,7 @@ private struct TerminalRepresentable: NSViewRepresentable {
 
         logDebug("Syncing allowMouseReporting=\(entry.mouseReportingEnabled)")
         terminalView.allowMouseReporting = entry.mouseReportingEnabled
+        entry.applyTheme(terminalConfig.theme, systemColorScheme: colorScheme)
 
         if terminalView.process?.running == true {
             if let sessionName = container.sessionName, let tmux = tmuxExecutable(searchPaths: terminalConfig.tmuxSearchPaths) {
