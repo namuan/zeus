@@ -1,0 +1,5 @@
+Adds a native NSFontPanel-backed terminal font chooser.
+
+- Persists selected PostScript font name, size, and weight.
+- Propagates font changes to active and future terminal entries.
+- Adds persistence and live-update tests.
