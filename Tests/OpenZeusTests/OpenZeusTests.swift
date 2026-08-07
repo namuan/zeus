@@ -77,6 +77,20 @@ import Testing
     #expect(config.terminal.theme == .system)
 }
 
+@Test func terminalFontSelectionRoundTrips() throws {
+    var config = AppConfig()
+    config.terminal.fontFamily = "JetBrainsMono-Bold"
+    config.terminal.fontSize = 16
+    config.terminal.fontWeight = "bold"
+
+    let data = try JSONEncoder().encode(config)
+    let restored = try JSONDecoder().decode(AppConfig.self, from: data)
+
+    #expect(restored.terminal.fontFamily == "JetBrainsMono-Bold")
+    #expect(restored.terminal.fontSize == 16)
+    #expect(restored.terminal.fontWeight == "bold")
+}
+
 @Test func agentStatusCodable() throws {
     let statuses: [AgentStatus] = [.idle, .running, .stopped, .error]
     for status in statuses {
