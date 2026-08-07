@@ -32,7 +32,9 @@ struct OpenZeusApp: App {
                     }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .appConfigChanged)) { _ in
-                    appConfig = AppConfig.load()
+                    let updatedConfig = AppConfig.load()
+                    appConfig = updatedConfig
+                    terminalStore.updateTerminalConfig(updatedConfig.terminal)
                 }
         }
 

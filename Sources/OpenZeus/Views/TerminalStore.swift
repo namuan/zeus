@@ -87,6 +87,10 @@ final class TerminalEntry: ObservableObject {
         terminalView.window?.makeFirstResponder(terminalView)
     }
 
+    func updateFont(_ config: TerminalConfig) {
+        terminalView.font = resolvedFont(config)
+    }
+
     private func startPolling() {
         guard pollTimer == nil else {
             logDebug("startPolling: already polling, skipping")
@@ -657,7 +661,7 @@ final class TerminalStore: ObservableObject {
     private var cancellables: Set<AnyCancellable> = []
     private var periodicCleanupTask: Task<Void, Never>?
 
-    private let config: TerminalConfig
+    private var config: TerminalConfig
     private var taskMetadata: [UUID: (name: String, watchMode: WatchMode)] = [:]
     private let notifier: ActivityNotifier
     nonisolated(unsafe) private var optionKeyMonitor: Any?
@@ -668,6 +672,13 @@ final class TerminalStore: ObservableObject {
     init(config: TerminalConfig = .init(), notificationConfig: NotificationConfig = .init()) {
         self.config = config
         self.notifier = ActivityNotifier(config: notificationConfig)
+    }
+
+    func updateTerminalConfig(_ config: TerminalConfig) {
+        self.config = config
+        for entry in entries.values {
+            entry.updateFont(config)
+        }
     }
 
     deinit {

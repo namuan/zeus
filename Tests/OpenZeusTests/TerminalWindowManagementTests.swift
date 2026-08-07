@@ -151,6 +151,19 @@ private func killTmuxSessionSync(_ tmux: String, sessionName: String) {
     #expect(entry2.taskID == taskID2)
 }
 
+@Test @MainActor func terminalStoreAppliesFontChangesToExistingAndNewEntriesTest() {
+    let store = TerminalStore()
+    let existingEntry = store.entry(for: UUID())
+    var config = TerminalConfig()
+    config.fontSize = 19
+    config.fontWeight = "bold"
+
+    store.updateTerminalConfig(config)
+
+    #expect(existingEntry.terminalView.font.pointSize == 19)
+    #expect(store.entry(for: UUID()).terminalView.font.pointSize == 19)
+}
+
 @Test @MainActor func terminalStoreMetadataUpdateSetsWorkingDirectoryTest() {
     let store = TerminalStore()
     let taskID = UUID()

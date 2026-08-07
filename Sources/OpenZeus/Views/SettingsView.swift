@@ -75,11 +75,25 @@ private struct TerminalTab: View {
         "medium", "semibold", "bold", "heavy", "black",
     ]
 
+    @State private var fontPanelController = TerminalFontPanelController()
+
     var body: some View {
         Form {
             Section("Font") {
-                TextField("Family", text: $config.fontFamily)
-                    .help("\"monospacedSystemFont\" for the system default, or a PostScript name like \"JetBrainsMono-Regular\".")
+                LabeledContent("Family") {
+                    HStack {
+                        Text(selectedFont.displayName ?? selectedFont.fontName)
+                            .lineLimit(1)
+                        Spacer()
+                        Button("Choose…") {
+                            fontPanelController.present(
+                                selectedFont: selectedFont,
+                                onFontSelected: apply
+                            )
+                        }
+                    }
+                }
+                .help("Choose a font face from the standard macOS font panel.")
 
                 HStack {
                     Text("Size")
@@ -141,6 +155,73 @@ private struct TerminalTab: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    private var selectedFont: NSFont {
+        let size = CGFloat(config.fontSize)
+        if config.fontFamily == "monospacedSystemFont" {
+            return NSFont.monospacedSystemFont(ofSize: size, weight: fontWeight(for: config.fontWeight))
+        }
+        return NSFont(name: config.fontFamily, size: size)
+            ?? NSFont.monospacedSystemFont(ofSize: size, weight: fontWeight(for: config.fontWeight))
+    }
+
+    private func apply(_ font: NSFont) {
+        config.fontFamily = font.fontName
+        config.fontSize = min(max(Int(font.pointSize.rounded()), 8), 72)
+        config.fontWeight = Self.weightName(for: font)
+    }
+
+    private func fontWeight(for name: String) -> NSFont.Weight {
+        switch name {
+        case "ultralight": .ultraLight
+        case "thin": .thin
+        case "light": .light
+        case "medium": .medium
+        case "semibold": .semibold
+        case "bold": .bold
+        case "heavy": .heavy
+        case "black": .black
+        default: .regular
+        }
+    }
+
+    private static func weightName(for font: NSFont) -> String {
+        let traits = font.fontDescriptor.object(forKey: .traits) as? [NSFontDescriptor.TraitKey: Any]
+        let value = (traits?[.weight] as? NSNumber)?.doubleValue ?? 0
+        let weights: [(name: String, value: Double)] = [
+            ("ultralight", -0.8), ("thin", -0.6), ("light", -0.4),
+            ("regular", 0), ("medium", 0.23), ("semibold", 0.3),
+            ("bold", 0.4), ("heavy", 0.56), ("black", 0.62),
+        ]
+        return weights.min { abs($0.value - value) < abs($1.value - value) }?.name ?? "regular"
+    }
+}
+
+@MainActor
+private final class TerminalFontPanelController: NSObject {
+    private var selectedFont: NSFont?
+    private var onFontSelected: ((NSFont) -> Void)?
+
+    func present(selectedFont: NSFont, onFontSelected: @escaping (NSFont) -> Void) {
+        self.selectedFont = selectedFont
+        self.onFontSelected = onFontSelected
+
+        let fontManager = NSFontManager.shared
+        fontManager.target = self
+        fontManager.action = #selector(selectFont(_:))
+        fontManager.setSelectedFont(selectedFont, isMultiple: false)
+        fontManager.orderFrontFontPanel(nil)
+    }
+
+    @objc private func selectFont(_ sender: Any?) {
+        guard let selectedFont,
+              let fontManager = sender as? NSFontManager
+        else { return }
+
+        let font = fontManager.convert(selectedFont)
+        self.selectedFont = font
+        onFontSelected?(font)
     }
 }
 
