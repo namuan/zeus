@@ -29,6 +29,9 @@ struct ContentView: View {
                     Set(appDatabase.tasks.filter { !$0.isArchived }.map { $0.id }
                         + appDatabase.projects.filter { !$0.isDeleted }.map { $0.id })
                 }
+                terminalStore.startTranscriptSync(interval: appConfig.terminal.pollIntervalSeconds) {
+                    Set(appDatabase.tasks.filter { !$0.isArchived }.map(\.id))
+                }
             }
             .onChange(of: selectedTask) { _, newTask in
                 saveTaskSelection(newTask)

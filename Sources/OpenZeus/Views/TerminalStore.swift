@@ -67,6 +67,7 @@ final class TerminalEntry: ObservableObject {
     let config: TerminalConfig
     private let delegate: TerminalEntryDelegate
     private var pollTimer: Timer?
+    var onSessionStateRefreshed: ((String, String) -> Void)?
 
     private var sessionName: String { "\(config.tmuxSessionPrefix)\(taskID.uuidString)" }
     private var knownShells: Set<String> { Set(config.knownShells) }
@@ -164,6 +165,7 @@ final class TerminalEntry: ObservableObject {
         let count = panesOutput.split(separator: "\n").filter { !$0.isEmpty }.count
         paneCount = max(1, count)
         logDebug("checkActiveProcess: pane count updated to \(paneCount)")
+        onSessionStateRefreshed?(sessionName, tmux)
     }
 
     private func parseWindowState(_ output: String) {
@@ -660,9 +662,12 @@ final class TerminalStore: ObservableObject {
     @Published private(set) var attentionTaskIDs: Set<UUID> = []
     private var cancellables: Set<AnyCancellable> = []
     private var periodicCleanupTask: Task<Void, Never>?
+    private var transcriptSyncTask: Task<Void, Never>?
 
     private var config: TerminalConfig
     private var taskMetadata: [UUID: (name: String, watchMode: WatchMode)] = [:]
+    private var transcriptEnabledTaskIDs: Set<UUID> = []
+    private let transcriptRecorder = TerminalTranscriptRecorder()
     private let notifier: ActivityNotifier
     nonisolated(unsafe) private var optionKeyMonitor: Any?
     nonisolated(unsafe) private var shiftReturnMonitor: Any?
@@ -692,10 +697,14 @@ final class TerminalStore: ObservableObject {
             NSEvent.removeMonitor(monitor)
         }
         periodicCleanupTask?.cancel()
+        transcriptSyncTask?.cancel()
     }
 
-    func entry(for id: UUID) -> TerminalEntry {
+    func entry(for id: UUID, recordTranscript: Bool = false) -> TerminalEntry {
         logInfo("TerminalStore.entry(for: \(id.uuidString)) - entries count=\(entries.count)")
+        if recordTranscript {
+            transcriptEnabledTaskIDs.insert(id)
+        }
         if let existing = entries[id] {
             logDebug("TerminalStore: returning existing entry")
             return existing
@@ -705,6 +714,12 @@ final class TerminalStore: ObservableObject {
         installShiftReturnMonitor()
         installReturnFocusMonitor()
         let entry = TerminalEntry(taskID: id, config: config)
+        entry.onSessionStateRefreshed = { [weak self, id] sessionName, tmux in
+            guard let self, self.transcriptEnabledTaskIDs.contains(id) else { return }
+            Task {
+                await self.transcriptRecorder.reconcile(taskID: id, sessionName: sessionName, tmux: tmux)
+            }
+        }
         entries[id] = entry
         entry.$hasActiveProcess
             .removeDuplicates()
@@ -732,9 +747,14 @@ final class TerminalStore: ObservableObject {
     }
 
     /// Update cached metadata for a task (call when the task's terminal opens or watch mode changes).
-    func updateTaskMetadata(taskID: UUID, name: String, watchMode: WatchMode, workingDirectory: String = "", projectDirectory: String = "", projectName: String = "") {
-        logInfo("TerminalStore.updateTaskMetadata: task=\(taskID.uuidString), name='\(name)', watchMode=\(watchMode), cwd='\(workingDirectory)', projectDirectory='\(projectDirectory)', projectName='\(projectName)'")
+    func updateTaskMetadata(taskID: UUID, name: String, watchMode: WatchMode, workingDirectory: String = "", projectDirectory: String = "", projectName: String = "", recordTranscript: Bool = true) {
+        logInfo("TerminalStore.updateTaskMetadata: task=\(taskID.uuidString), name='\(name)', watchMode=\(watchMode), cwd='\(workingDirectory)', projectDirectory='\(projectDirectory)', projectName='\(projectName)', recordTranscript=\(recordTranscript)")
         taskMetadata[taskID] = (name: name, watchMode: watchMode)
+        if recordTranscript {
+            transcriptEnabledTaskIDs.insert(taskID)
+        } else {
+            transcriptEnabledTaskIDs.remove(taskID)
+        }
         entries[taskID]?.taskName = name
         entries[taskID]?.workingDirectory = workingDirectory
         entries[taskID]?.projectDirectory = projectDirectory
@@ -853,6 +873,7 @@ final class TerminalStore: ObservableObject {
             let sessionName = "\(config.tmuxSessionPrefix)\(taskID.uuidString)"
             logDebug("TerminalStore.killSession: killing tmux session \(sessionName)")
             Task {
+                await transcriptRecorder.stopRecording(taskID: taskID, tmux: tmux)
                 await terminateSessionProcesses(
                     sessionName: sessionName, tmux: tmux,
                     pkillPath: config.pkillPath, sigtermGracePeriodMs: config.sigtermGracePeriodMs
@@ -864,6 +885,7 @@ final class TerminalStore: ObservableObject {
         }
         activeProcessTaskIDs.remove(taskID)
         attentionTaskIDs.remove(taskID)
+        transcriptEnabledTaskIDs.remove(taskID)
     }
 
     /// Clear the attention state when the user opens the task's terminal.
@@ -893,6 +915,7 @@ final class TerminalStore: ObservableObject {
             logInfo("TerminalStore.cleanupOrphanedSessions: found \(orphans.count) orphaned session(s)")
             for (session, taskID) in orphans {
                 logInfo("TerminalStore.cleanupOrphanedSessions: killing \(session)")
+                await transcriptRecorder.stopRecording(taskID: taskID, tmux: tmux)
                 await terminateSessionProcesses(
                     sessionName: session, tmux: tmux,
                     pkillPath: config.pkillPath, sigtermGracePeriodMs: config.sigtermGracePeriodMs
@@ -902,7 +925,37 @@ final class TerminalStore: ObservableObject {
                 entries.removeValue(forKey: taskID)
                 activeProcessTaskIDs.remove(taskID)
                 attentionTaskIDs.remove(taskID)
+                transcriptEnabledTaskIDs.remove(taskID)
             }
+        }
+    }
+
+    /// Start recording and cleaning the output of all existing task tmux sessions.
+    /// This deliberately runs independently of the selected task so transcripts remain current
+    /// after a session has been opened once or restored from a prior app launch.
+    func startTranscriptSync(interval: TimeInterval, taskIDsProvider: @escaping @MainActor () -> Set<UUID>) {
+        transcriptSyncTask?.cancel()
+        transcriptSyncTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                await synchronizeTranscripts(taskIDs: taskIDsProvider())
+                try? await Task.sleep(for: .seconds(interval))
+            }
+        }
+    }
+
+    private func synchronizeTranscripts(taskIDs: Set<UUID>) async {
+        guard let tmux = tmuxExecutable(searchPaths: config.tmuxSearchPaths) else { return }
+        let sessionOutput = await runProcessOutput(tmux, args: ["list-sessions", "-F", "#{session_name}"])
+        let existingSessions = Set(
+            sessionOutput
+                .split(separator: "\n")
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+        )
+        for taskID in taskIDs where !Task.isCancelled {
+            let sessionName = "\(config.tmuxSessionPrefix)\(taskID.uuidString)"
+            guard existingSessions.contains(sessionName) else { continue }
+            await transcriptRecorder.reconcile(taskID: taskID, sessionName: sessionName, tmux: tmux)
         }
     }
 

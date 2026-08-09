@@ -16,7 +16,7 @@ struct TerminalPane: View {
             command: task.command,
             workingDirectory: task.effectiveWorkingDirectory,
             navigationTitle: task.name,
-            entry: terminalStore.entry(for: task.id)
+            entry: terminalStore.entry(for: task.id, recordTranscript: true)
         )
         .onAppear {
             logInfo("TerminalPane.onAppear: task=\(task.name), watchMode=\(task.watchMode), cwd='\(task.effectiveWorkingDirectory)', projectDirectory='\(projectDirectory)'")
@@ -55,7 +55,14 @@ struct NoTaskDetailPane: View {
             autoStart: false
         )
         .onAppear {
-            terminalStore.updateTaskMetadata(taskID: project.id, name: project.name, watchMode: .off, workingDirectory: cwd, projectDirectory: cwd)
+            terminalStore.updateTaskMetadata(
+                taskID: project.id,
+                name: project.name,
+                watchMode: .off,
+                workingDirectory: cwd,
+                projectDirectory: cwd,
+                recordTranscript: false
+            )
         }
     }
 }
