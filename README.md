@@ -17,6 +17,7 @@ Native macOS AI agent orchestrator. Visual control plane for managing fleets of 
 - **Configurable font** — set font family, size, and weight in Settings
 - **Shift+Enter support** — kitty keyboard protocol for apps like Claude Code
 - **Orphan cleanup** — periodic scan kills tmux sessions whose tasks no longer exist
+- **Per-pane transcripts** — retained, plain-text transcripts for every tmux-backed task pane; ANSI styling and terminal control codes are removed
 
 ### Git Integration
 
@@ -80,6 +81,8 @@ Native macOS AI agent orchestrator. Visual control plane for managing fleets of 
 | LLM | Provider, base URL, model, API key env var |
 
 Configuration is stored as JSON in `~/Library/Application Support/OpenZeus/config.json`.
+
+Task-pane transcripts are stored in `~/Library/Application Support/OpenZeus/Transcripts/`. They are retained after panes, tasks, and projects are closed or deleted. Use **Settings → Data → Open Transcript Directory** to reveal them in Finder. Transcript capture requires tmux; full-screen applications that repeatedly redraw their display may be less linear than normal shell and agent output.
 
 ## Install
 

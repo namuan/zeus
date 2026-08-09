@@ -700,6 +700,16 @@ private struct DataTab: View {
                 TextField("Log file name", text: $logging.logFileName)
             }
 
+            Section("Terminal Transcripts") {
+                HStack {
+                    Text("Plain-text transcripts are retained for every tmux task pane.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Open Transcript Directory") { revealTranscriptFolder() }
+                }
+            }
+
             Section("Log Rotation") {
                 HStack {
                     Text("Max file size")
@@ -743,6 +753,12 @@ private struct DataTab: View {
     private func revealLogsFolder() {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let url = home.appendingPathComponent(logging.logsDirectory)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(url)
+    }
+
+    private func revealTranscriptFolder() {
+        let url = TerminalTranscriptRecorder.defaultRootURL()
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         NSWorkspace.shared.open(url)
     }
