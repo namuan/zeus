@@ -37,33 +37,12 @@ swift test
 ./install.command
 ```
 
-## Codebase Documentation
-
-Detailed codebase analysis lives in `.planning/codebase/`:
-
-| Document | Description |
-|----------|-------------|
-| [STACK.md](.planning/codebase/STACK.md) | Languages, runtime, frameworks, dependencies |
-| [ARCHITECTURE.md](.planning/codebase/ARCHITECTURE.md) | System design, patterns, data flow, entry points |
-| [STRUCTURE.md](.planning/codebase/STRUCTURE.md) | Directory layout and key file locations |
-| [CONVENTIONS.md](.planning/codebase/CONVENTIONS.md) | Code style, naming, error handling patterns |
-| [TESTING.md](.planning/codebase/TESTING.md) | Test framework, structure, mocking patterns |
-| [INTEGRATIONS.md](.planning/codebase/INTEGRATIONS.md) | External services, system integrations |
-| [CONCERNS.md](.planning/codebase/CONCERNS.md) | Tech debt, bugs, performance, security |
-
 **Quick reference:**
 - Models: `Sources/OpenZeus/Models/`
 - Core (DB, actors): `Sources/OpenZeus/Core/`
 - Views (MVVM): `Sources/OpenZeus/Views/`
 - Services: `Sources/OpenZeus/Services/`
 - Tests: `Tests/OpenZeusTests/`
-
-## GSD Planning
-
-If using Get-Shit-Done workflow:
-- Project state: `.planning/STATE.md`
-- Roadmap: `.planning/ROADMAP.md`
-- Quick tasks: `.planning/quick/`
 
 ## What to Avoid
 
