@@ -16,9 +16,6 @@
     "sigtermGracePeriodMs": 300,
     "// sigtermGracePeriodMs": "Milliseconds to wait after sending SIGTERM before the tmux session is killed.",
 
-    "scrollTimerIntervalSeconds": 0.05,
-    "// scrollTimerIntervalSeconds": "Debounce interval (seconds) for batching scroll-wheel events into tmux copy-mode commands.",
-
     "mouseModeDelayMs": 300,
     "// mouseModeDelayMs": "Milliseconds to wait before enabling tmux mouse mode after the session starts.",
 

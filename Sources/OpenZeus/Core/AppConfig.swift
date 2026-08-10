@@ -175,7 +175,6 @@ struct TerminalConfig: Codable, Equatable, Sendable {
     var tmuxSettleDelayMs: Int
     var orphanCleanupIntervalSeconds: Double
     var sigtermGracePeriodMs: Int
-    var scrollTimerIntervalSeconds: Double
     var mouseModeDelayMs: Int
     var defaultShell: String
     var fontFamily: String
@@ -192,7 +191,6 @@ struct TerminalConfig: Codable, Equatable, Sendable {
         tmuxSettleDelayMs: Int = 200,
         orphanCleanupIntervalSeconds: Double = 300.0,
         sigtermGracePeriodMs: Int = 300,
-        scrollTimerIntervalSeconds: Double = 0.05,
         mouseModeDelayMs: Int = 300,
         defaultShell: String = "",
         fontFamily: String = "monospacedSystemFont",
@@ -208,7 +206,6 @@ struct TerminalConfig: Codable, Equatable, Sendable {
         self.tmuxSettleDelayMs = tmuxSettleDelayMs
         self.orphanCleanupIntervalSeconds = orphanCleanupIntervalSeconds
         self.sigtermGracePeriodMs = sigtermGracePeriodMs
-        self.scrollTimerIntervalSeconds = scrollTimerIntervalSeconds
         self.mouseModeDelayMs = mouseModeDelayMs
         self.defaultShell = defaultShell
         self.fontFamily = fontFamily
@@ -228,7 +225,6 @@ struct TerminalConfig: Codable, Equatable, Sendable {
         tmuxSettleDelayMs          = (try? c.decode(Int.self, forKey: .tmuxSettleDelayMs))          ?? d.tmuxSettleDelayMs
         orphanCleanupIntervalSeconds = (try? c.decode(Double.self, forKey: .orphanCleanupIntervalSeconds)) ?? d.orphanCleanupIntervalSeconds
         sigtermGracePeriodMs       = (try? c.decode(Int.self, forKey: .sigtermGracePeriodMs))       ?? d.sigtermGracePeriodMs
-        scrollTimerIntervalSeconds = (try? c.decode(Double.self, forKey: .scrollTimerIntervalSeconds)) ?? d.scrollTimerIntervalSeconds
         mouseModeDelayMs           = (try? c.decode(Int.self, forKey: .mouseModeDelayMs))           ?? d.mouseModeDelayMs
         defaultShell               = (try? c.decode(String.self, forKey: .defaultShell))               ?? d.defaultShell
         fontFamily                 = (try? c.decode(String.self, forKey: .fontFamily))                 ?? d.fontFamily

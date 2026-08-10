@@ -1175,11 +1175,8 @@ private struct AppLauncherButton: View {
 }
 
 
-private class TerminalContainerView: NSView {
+final class TerminalContainerView: NSView {
     var sessionName: String?
-    var terminalConfig: TerminalConfig = .init()
-    nonisolated(unsafe) private var scrollAccumulator: CGFloat = 0
-    nonisolated(unsafe) private var scrollTimer: Timer?
     nonisolated(unsafe) private var didSelectionDrag = false
 
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -1208,28 +1205,13 @@ private class TerminalContainerView: NSView {
     override func mouseMoved(with event: NSEvent) { subviews.first?.mouseMoved(with: event) }
 
     override func scrollWheel(with event: NSEvent) {
-        guard let sessionName, let tmux = tmuxExecutable(searchPaths: terminalConfig.tmuxSearchPaths) else {
-            subviews.first?.scrollWheel(with: event) ?? super.scrollWheel(with: event)
-            return
-        }
-
-        scrollAccumulator += event.scrollingDeltaY
-        scrollTimer?.invalidate()
-        scrollTimer = Timer.scheduledTimer(withTimeInterval: terminalConfig.scrollTimerIntervalSeconds, repeats: false) { [weak self] _ in
-            guard let self else { return }
-            let delta = self.scrollAccumulator
-            self.scrollAccumulator = 0
-            let steps = max(1, Int(abs(delta) / 8))
-            let goingUp = delta > 0
-            Task {
-                if goingUp {
-                    await runProcessOutput(tmux, args: ["copy-mode", "-t", sessionName])
-                    await runProcessOutput(tmux, args: ["send-keys", "-X", "-N", "\(steps)", "-t", sessionName, "scroll-up"])
-                } else {
-                    await runProcessOutput(tmux, args: ["send-keys", "-X", "-N", "\(steps)", "-t", sessionName, "scroll-down"])
-                }
-            }
-        }
+        // Forward every scroll event immediately to SwiftTerm. SwiftTerm
+        // translates precise trackpad deltas (including momentum) and discrete
+        // mouse-wheel ticks into terminal lines. When tmux mouse mode is
+        // enabled, the resulting terminal mouse events are handled by tmux,
+        // which enters copy mode and scrolls the pane under the pointer.
+        // Without tmux, SwiftTerm scrolls its own history buffer directly.
+        subviews.first?.scrollWheel(with: event) ?? super.scrollWheel(with: event)
     }
 }
 
@@ -1247,7 +1229,6 @@ private struct TerminalRepresentable: NSViewRepresentable {
     }
 
     func updateNSView(_ container: TerminalContainerView, context: Context) {
-        container.terminalConfig = terminalConfig
         let terminalView = entry.terminalView
         logDebug("TerminalRepresentable.updateNSView: session=\(sessionID), process running=\(terminalView.process?.running ?? false)")
 

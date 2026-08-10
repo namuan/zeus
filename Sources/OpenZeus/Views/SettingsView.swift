@@ -135,7 +135,6 @@ private struct TerminalTab: View {
                     .help("How often to check each tmux session for an active process.")
                 IntFieldRow("Tmux settle delay", value: $config.tmuxSettleDelayMs, unit: "ms")
                     .help("Wait after tmux window/pane operations before refreshing state.")
-                DoubleRow("Scroll timer interval", value: $config.scrollTimerIntervalSeconds, unit: "s")
                 IntFieldRow("Mouse mode delay", value: $config.mouseModeDelayMs, unit: "ms")
                 IntFieldRow("SIGTERM grace period", value: $config.sigtermGracePeriodMs, unit: "ms")
                 DoubleRow("Orphan cleanup interval", value: $config.orphanCleanupIntervalSeconds, unit: "s")

@@ -180,11 +180,13 @@ Toolbar button: `bolt.fill`
 
 ## Scrollback Behavior
 
-### Custom mouse-wheel scroll handling
+### Native scroll event forwarding
 
-- The terminal container intercepts scroll events instead of letting SwiftTerm consume them directly.
-- When tmux is active, scrolling enters tmux copy mode and sends scroll-up/scroll-down commands.
-- Scroll input is batched briefly to reduce command spam.
+- The terminal container forwards every scroll event immediately to SwiftTerm.
+- SwiftTerm translates precise trackpad deltas (including momentum) and discrete mouse-wheel ticks into terminal lines.
+- With tmux mouse mode enabled, the resulting terminal mouse events are handled by tmux, which enters copy mode and scrolls the pane under the pointer.
+- Without tmux, SwiftTerm scrolls its own history buffer directly.
+- Scroll gestures never spawn separate `copy-mode`/`scroll-up`/`scroll-down` processes.
 
 ### Mouse interaction forwarding
 

@@ -52,7 +52,6 @@ Annotated example config file showing every key with its default and a comment e
 | `tmuxSettleDelayMs` | Int | `200` | `TerminalStore.swift:184` (and 6 others) |
 | `orphanCleanupIntervalSeconds` | Double | `300.0` | `TerminalStore.swift:562` |
 | `sigtermGracePeriodMs` | Int | `300` | `TerminalStore.swift:594` |
-| `scrollTimerIntervalSeconds` | Double | `0.05` | `TerminalView.swift:499` |
 | `mouseModeDelayMs` | Int | `300` | `TerminalView.swift:551` |
 | `defaultShell` | String | `"$SHELL"` or `"/bin/bash"` | `TerminalView.swift:561`, `TaskList.swift:143` |
 | `fontFamily` | String | `"monospacedSystemFont"` | `TerminalStore.swift:56` |
