@@ -804,17 +804,20 @@ private func killTmuxSessionSync(_ tmux: String, sessionName: String) {
     _ = await runProcessOutput(tmux, args: [
         "new-session", "-d", "-s", sessionName, "/bin/bash"
     ])
+    defer { killTmuxSessionSync(tmux, sessionName: sessionName) }
 
-    // Set mouse option to off
+    // Enable mouse mode for the session and confirm the option took effect
     let result = await runProcessOutput(tmux, args: [
-        "set-option", "-t", sessionName, "mouse", "off"
+        "set-option", "-t", sessionName, "mouse", "on"
     ])
 
     // set-option doesn't output on success
     #expect(result.isEmpty)
 
-    // Cleanup
-    killTmuxSessionSync(tmux, sessionName: sessionName)
+    let mouseOption = (await runProcessOutput(tmux, args: [
+        "show-options", "-v", "-t", sessionName, "mouse"
+    ])).trimmingCharacters(in: .whitespacesAndNewlines)
+    #expect(mouseOption == "on")
 }
 
 // MARK: - Edge Cases
@@ -1144,4 +1147,143 @@ private func killTmuxSessionSync(_ tmux: String, sessionName: String) {
     count = windows.trimmingCharacters(in: .whitespacesAndNewlines)
         .split(separator: "\n").count
     #expect(count == 1)
+}
+
+// MARK: - Terminal Container Scroll Forwarding Tests
+
+private final class RecordingScrollView: NSView {
+    var receivedScrollEvents: [NSEvent] = []
+    override func scrollWheel(with event: NSEvent) {
+        receivedScrollEvents.append(event)
+    }
+}
+
+private func makePreciseScrollEvent(deltaY: Int32) -> NSEvent {
+    let cgEvent = CGEvent(
+        scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1,
+        wheel1: deltaY, wheel2: 0, wheel3: 0
+    )!
+    return NSEvent(cgEvent: cgEvent)!
+}
+
+private func makeLineScrollEvent(lines: Int32) -> NSEvent {
+    let cgEvent = CGEvent(
+        scrollWheelEvent2Source: nil, units: .line, wheelCount: 1,
+        wheel1: lines, wheel2: 0, wheel3: 0
+    )!
+    return NSEvent(cgEvent: cgEvent)!
+}
+
+@Test @MainActor func terminalContainerForwardsScrollEventsImmediatelyTest() {
+    let container = TerminalContainerView()
+    let recorder = RecordingScrollView()
+    container.addSubview(recorder)
+
+    container.scrollWheel(with: makePreciseScrollEvent(deltaY: 40))
+
+    // Events must reach SwiftTerm synchronously — no debounce batching.
+    #expect(recorder.receivedScrollEvents.count == 1)
+}
+
+@Test @MainActor func terminalContainerPreservesScrollEventOrderTest() {
+    let container = TerminalContainerView()
+    let recorder = RecordingScrollView()
+    container.addSubview(recorder)
+
+    let first = makePreciseScrollEvent(deltaY: 40)
+    let second = makePreciseScrollEvent(deltaY: -25)
+    let third = makePreciseScrollEvent(deltaY: 8)
+    container.scrollWheel(with: first)
+    container.scrollWheel(with: second)
+    container.scrollWheel(with: third)
+
+    // A gesture must not be coalesced into a net delta; every event is
+    // forwarded in its original order so momentum and reversals work.
+    #expect(recorder.receivedScrollEvents.count == 3)
+    #expect(recorder.receivedScrollEvents[0] === first)
+    #expect(recorder.receivedScrollEvents[1] === second)
+    #expect(recorder.receivedScrollEvents[2] === third)
+}
+
+@Test @MainActor func terminalContainerForwardsMouseWheelLineEventsTest() {
+    let container = TerminalContainerView()
+    let recorder = RecordingScrollView()
+    container.addSubview(recorder)
+
+    container.scrollWheel(with: makeLineScrollEvent(lines: 3))
+
+    #expect(recorder.receivedScrollEvents.count == 1)
+    #expect(recorder.receivedScrollEvents[0].hasPreciseScrollingDeltas == false)
+}
+
+@Test @MainActor func terminalContainerScrollForwardingDoesNotDependOnTmuxTest() {
+    // Scrolling must reach SwiftTerm even when tmux handling is active or
+    // absent, so the direct-shell fallback keeps scrolling its own history.
+    let container = TerminalContainerView()
+    let recorder = RecordingScrollView()
+    container.addSubview(recorder)
+
+    container.scrollWheel(with: makePreciseScrollEvent(deltaY: -12))
+
+    #expect(recorder.receivedScrollEvents.count == 1)
+}
+
+// MARK: - Tmux Mouse Scrolling Integration Tests
+
+@Test @MainActor func tmuxMouseModeScrollIntegrationTest() async {
+    guard let tmux = tmuxExecutable() else {
+        return  // Skip if tmux not installed
+    }
+
+    let sessionName = "zeus-test-scroll-\(UUID().uuidString.prefix(8))"
+    defer { killTmuxSessionSync(tmux, sessionName: sessionName) }
+
+    // Create a session and generate scrollback
+    _ = await runProcessOutput(tmux, args: [
+        "new-session", "-d", "-x", "80", "-y", "12", "-s", sessionName, "/bin/bash"
+    ])
+    try? await Task.sleep(for: .milliseconds(300))
+    _ = await runProcessOutput(tmux, args: [
+        "send-keys", "-t", sessionName, "seq 1 100", "Enter"
+    ])
+    try? await Task.sleep(for: .milliseconds(400))
+
+    let historySize = Int(
+        (await runProcessOutput(tmux, args: [
+            "display-message", "-p", "-t", sessionName, "#{history_size}"
+        ])).trimmingCharacters(in: .whitespacesAndNewlines)
+    ) ?? 0
+    #expect(historySize > 0)
+
+    // Enable mouse mode as the app does and confirm the option took effect
+    _ = await runProcessOutput(tmux, args: [
+        "set-option", "-t", sessionName, "mouse", "on"
+    ])
+    let mouseOption = (await runProcessOutput(tmux, args: [
+        "show-options", "-v", "-t", sessionName, "mouse"
+    ])).trimmingCharacters(in: .whitespacesAndNewlines)
+    #expect(mouseOption == "on")
+
+    // Scroll up into history: copy mode engages and the scroll position moves
+    // away from the live output.
+    _ = await runProcessOutput(tmux, args: ["copy-mode", "-t", sessionName])
+    _ = await runProcessOutput(tmux, args: [
+        "send-keys", "-X", "-t", sessionName, "-N", "3", "scroll-up"
+    ])
+    let scrolledState = (await runProcessOutput(tmux, args: [
+        "display-message", "-p", "-t", sessionName, "#{pane_in_mode}|#{scroll_position}"
+    ])).trimmingCharacters(in: .whitespacesAndNewlines)
+    let scrolledParts = scrolledState.split(separator: "|").map(String.init)
+    #expect(scrolledParts.count == 2)
+    #expect(scrolledParts[0] == "1")
+    #expect(Int(scrolledParts[1]) ?? -1 >= 3)
+
+    // Scroll back down: the position returns to the live output.
+    _ = await runProcessOutput(tmux, args: [
+        "send-keys", "-X", "-t", sessionName, "-N", "3", "scroll-down"
+    ])
+    let returnedPosition = (await runProcessOutput(tmux, args: [
+        "display-message", "-p", "-t", sessionName, "#{scroll_position}"
+    ])).trimmingCharacters(in: .whitespacesAndNewlines)
+    #expect(Int(returnedPosition) ?? -1 == 0)
 }

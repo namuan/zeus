@@ -13,7 +13,7 @@ Native macOS AI agent orchestrator. Visual control plane for managing fleets of 
 - **Persistent sessions** — tmux-backed sessions survive app restarts; attach to a running agent anytime
 - **Multi-window management** — open, close, split (horizontal/vertical), rotate, and zoom panes per task
 - **Process detection** — live badges show when an agent is running vs idle, with child-process tree traversal
-- **Scroll & mouse mode** — scroll wheel forwarding to tmux copy-mode, auto-copy on selection drag
+- **Scroll & mouse mode** — trackpad and mouse-wheel scrolling flows through tmux mouse mode (copy-mode scrolling with pane-under-pointer targeting), auto-copy on selection drag
 - **Configurable font** — set font family, size, and weight in Settings
 - **Shift+Enter support** — kitty keyboard protocol for apps like Claude Code
 - **Orphan cleanup** — periodic scan kills tmux sessions whose tasks no longer exist
