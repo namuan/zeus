@@ -190,6 +190,28 @@ actor TerminalTranscriptRecorder {
         rootURL
     }
 
+    /// Returns the transcript session directories recorded for a task, most
+    /// recently modified first. Each directory holds the `pane-*.txt`
+    /// transcripts for one tmux session of that task.
+    nonisolated func transcriptDirectories(for taskID: UUID) -> [URL] {
+        let taskDirectory = rootURL.appendingPathComponent(taskID.uuidString, isDirectory: true)
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: taskDirectory,
+            includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey],
+            options: []
+        ) else {
+            return []
+        }
+        let directories = entries.filter { url in
+            (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+        }
+        return directories.sorted { lhs, rhs in
+            let lhsDate = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let rhsDate = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return lhsDate > rhsDate
+        }
+    }
+
     func reconcile(taskID: UUID, sessionName: String, tmux: String) async {
         guard let sessionID = await recordingSessionID(sessionName: sessionName, tmux: tmux) else {
             return

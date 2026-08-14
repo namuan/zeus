@@ -944,6 +944,12 @@ final class TerminalStore: ObservableObject {
         }
     }
 
+    /// Transcript session directories recorded for a task, most recently modified first.
+    /// Empty when the task's terminal has never been opened (or its transcripts were deleted).
+    func transcriptDirectories(for taskID: UUID) -> [URL] {
+        transcriptRecorder.transcriptDirectories(for: taskID)
+    }
+
     private func synchronizeTranscripts(taskIDs: Set<UUID>) async {
         guard let tmux = tmuxExecutable(searchPaths: config.tmuxSearchPaths) else { return }
         let sessionOutput = await runProcessOutput(tmux, args: ["list-sessions", "-F", "#{session_name}"])
