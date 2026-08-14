@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct TaskList: View {
@@ -608,7 +609,42 @@ private struct TaskRow: View {
         .sheet(isPresented: $showingEdit) {
             EditTaskSheet(task: task)
         }
+        .contextMenu {
+            transcriptMenu
+        }
     }
+
+    @ViewBuilder
+    private var transcriptMenu: some View {
+        let directories = terminalStore.transcriptDirectories(for: task.id)
+        if directories.isEmpty {
+            Button("Open Transcript in Finder") {}
+                .disabled(true)
+        } else if directories.count == 1, let directory = directories.first {
+            Button("Open Transcript in Finder") {
+                NSWorkspace.shared.open(directory)
+            }
+        } else {
+            Menu("Open Transcript in Finder") {
+                ForEach(Array(directories.enumerated()), id: \.offset) { _, directory in
+                    Button(Self.transcriptLabel(for: directory)) {
+                        NSWorkspace.shared.open(directory)
+                    }
+                }
+            }
+        }
+    }
+
+    private static func transcriptLabel(for url: URL) -> String {
+        let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+        return "Session · \(Self.transcriptDateFormatter.string(from: date))"
+    }
+
+    private static let transcriptDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d, HH:mm"
+        return formatter
+    }()
 
     @ViewBuilder
     private var descriptionText: some View {

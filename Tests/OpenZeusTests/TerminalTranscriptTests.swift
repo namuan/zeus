@@ -91,6 +91,36 @@ import Testing
     await recorder.stopRecording(taskID: taskID, tmux: tmux)
 }
 
+@Test func terminalTranscriptRecorderListsTaskSessionDirectoriesMostRecentFirst() throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("openzeus-transcripts-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let taskID = UUID()
+    let taskDirectory = root.appendingPathComponent(taskID.uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: taskDirectory, withIntermediateDirectories: true)
+
+    let olderSession = taskDirectory.appendingPathComponent("session-older", isDirectory: true)
+    let newerSession = taskDirectory.appendingPathComponent("session-newer", isDirectory: true)
+    try FileManager.default.createDirectory(at: olderSession, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: newerSession, withIntermediateDirectories: true)
+    try FileManager.default.createFile(atPath: taskDirectory.appendingPathComponent("stray.txt").path, contents: nil)
+    try FileManager.default.setAttributes(
+        [.modificationDate: Date(timeIntervalSince1970: 1_700_000_000)],
+        ofItemAtPath: olderSession.path
+    )
+    try FileManager.default.setAttributes(
+        [.modificationDate: Date(timeIntervalSince1970: 1_700_000_600)],
+        ofItemAtPath: newerSession.path
+    )
+
+    let recorder = TerminalTranscriptRecorder(rootURL: root)
+    let directories = recorder.transcriptDirectories(for: taskID)
+
+    #expect(directories.map(\.lastPathComponent) == ["session-newer", "session-older"])
+    #expect(recorder.transcriptDirectories(for: UUID()).isEmpty)
+}
+
 private func killTranscriptTestTmuxSession(_ tmux: String, sessionName: String) {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: tmux)
