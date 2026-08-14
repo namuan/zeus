@@ -1,0 +1,1 @@
+Adds 'Open Transcript in Finder' to the task context menu — reveals the task's transcript session folder(s) in Finder, with a per-session submenu (most recent first) when multiple tmux sessions are recorded. Disabled when no transcript exists. Includes TerminalTranscriptRecorder.transcriptDirectories(for:) + TerminalStore passthrough + unit test.
