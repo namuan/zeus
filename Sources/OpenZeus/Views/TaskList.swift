@@ -354,10 +354,7 @@ struct NewTaskSheet: View {
         let service = WorktreeService(gitExecutablePath: appConfig.git.executablePath)
         do {
             let options = try await service.listBranchOptions(repoPath: repoPath)
-            let defaultBase = appConfig.worktree.defaultBaseBranch
-            branchOptions = options.filter { opt in
-                opt.kind != .remote || opt.localName != defaultBase
-            }
+            branchOptions = options
             if selectedBranchID.isEmpty || !branchOptions.contains(where: { $0.id == selectedBranchID && $0.isAvailable }),
                let first = branchOptions.first(where: \.isAvailable) {
                 selectedBranchID = first.id

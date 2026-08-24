@@ -364,14 +364,6 @@ private struct WorktreeTab: View {
                     .foregroundStyle(.secondary)
             }
 
-            Section("Branching") {
-                TextField("Base branch", text: $config.defaultBaseBranch)
-                    .help("Branch to base new task branches on (e.g. main, develop).")
-                Text("New branches are named task-{short-id}-{slug}.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
             Section("Defaults") {
                 Toggle("Create worktree for new tasks", isOn: $config.createByDefault)
                     .help("When enabled, the New Task dialog will have 'Create Git worktree' checked by default.")

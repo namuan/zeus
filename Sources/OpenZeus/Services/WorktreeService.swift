@@ -32,6 +32,7 @@ struct WorktreeBranchOption: Identifiable, Sendable {
 
 enum WorktreeError: LocalizedError {
     case notConfigured
+    case defaultBranchUnavailable(String)
     case gitCommandFailed(String)
     case directoryCreationFailed(String)
 
@@ -39,6 +40,8 @@ enum WorktreeError: LocalizedError {
         switch self {
         case .notConfigured:
             return "Worktree base path is not configured. Set it in Settings > Worktree."
+        case .defaultBranchUnavailable(let details):
+            return "Could not determine the repository default branch: \(details)"
         case .gitCommandFailed(let details):
             return "Git command failed: \(details)"
         case .directoryCreationFailed(let path):
@@ -89,7 +92,8 @@ final class WorktreeService: Sendable {
             branch = name.isEmpty
                 ? Self.branchName(for: request.taskID, taskName: request.taskName)
                 : name
-            gitArgs = ["worktree", "add", worktreePath, "-b", branch, config.defaultBaseBranch]
+            let baseBranch = try await defaultBranch(repoPath: request.repoPath)
+            gitArgs = ["worktree", "add", worktreePath, "-b", branch, baseBranch]
 
         case .existingBranch(let branchName):
             guard !branchName.isEmpty else {
@@ -243,6 +247,27 @@ final class WorktreeService: Sendable {
             .filter { !$0.isEmpty }
             .joined(separator: "-")
         return maxLength.map { String(joined.prefix($0)) } ?? joined
+    }
+
+    static func defaultBranch(from output: String) -> String? {
+        let prefix = "ref: refs/heads/"
+        guard let line = output.split(separator: "\n").first(where: { $0.hasPrefix(prefix) }) else {
+            return nil
+        }
+        let branch = line.dropFirst(prefix.count).split(whereSeparator: \Character.isWhitespace).first
+        return branch.map(String.init)
+    }
+
+    private func defaultBranch(repoPath: String) async throws -> String {
+        let result = await runGit(args: ["ls-remote", "--symref", "origin", "HEAD"], in: repoPath)
+        guard result.success else {
+            let details = result.error.isEmpty ? result.output : result.error
+            throw WorktreeError.defaultBranchUnavailable(details)
+        }
+        guard let branch = Self.defaultBranch(from: result.output), !branch.isEmpty else {
+            throw WorktreeError.defaultBranchUnavailable("origin did not report one.")
+        }
+        return branch
     }
 
     private func runGit(args: [String], in workingDirectory: String) async -> GitCommandResult {
