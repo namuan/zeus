@@ -131,6 +131,15 @@ import Testing
     #expect(fetched.first?.projectID == project.id)
 }
 
+@Test func worktreeDefaultBranchParsesOriginHead() {
+    let output = """
+    ref: refs/heads/master\tHEAD
+    e5b0a50c2c4d9f30d4fd8da3d5a778b0371c67f2\tHEAD
+    """
+
+    #expect(WorktreeService.defaultBranch(from: output) == "master")
+}
+
 @Test @MainActor func savedCommandDeleteWorks() throws {
     let db = try AppDatabase(inMemory: ())
     let project = Project(id: UUID(), name: "Test", directoryURL: URL(fileURLWithPath: "/tmp"))
