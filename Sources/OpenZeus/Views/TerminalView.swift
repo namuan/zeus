@@ -1221,6 +1221,7 @@ private struct TerminalRepresentable: NSViewRepresentable {
     let workingDirectory: String
     @ObservedObject var entry: TerminalEntry
     let terminalConfig: TerminalConfig
+    @EnvironmentObject private var appDatabase: AppDatabase
     @Environment(\.colorScheme) private var colorScheme
 
     func makeNSView(context: Context) -> TerminalContainerView {
@@ -1264,13 +1265,26 @@ private struct TerminalRepresentable: NSViewRepresentable {
         let shell = command.isEmpty ? terminalConfig.resolvedShell : command
         logInfo("TerminalRepresentable.updateNSView: starting process, shell='\(shell)', cwd='\(workingDirectory)'")
 
+        let startupCommand: String?
+        do {
+            startupCommand = try appDatabase.takeTaskStartupCommand(taskID: sessionID)
+        } catch {
+            logError("Unable to claim task startup command: \(error)")
+            return
+        }
+
         if let tmux = tmuxExecutable(searchPaths: terminalConfig.tmuxSearchPaths) {
             let sessionName = "\(terminalConfig.tmuxSessionPrefix)\(sessionID.uuidString)"
             container.sessionName = sessionName
             logInfo("TerminalRepresentable.updateNSView: starting tmux session '\(sessionName)'")
             terminalView.startProcess(
                 executable: tmux,
-                args: ["new-session", "-A", "-c", workingDirectory, "-s", sessionName, shell, "-l"],
+                args: TaskStartupCommand.tmuxLaunchArguments(
+                    sessionName: sessionName,
+                    shell: shell,
+                    workingDirectory: workingDirectory,
+                    startupCommand: startupCommand
+                ),
                 currentDirectory: workingDirectory
             )
             Task {
@@ -1286,6 +1300,10 @@ private struct TerminalRepresentable: NSViewRepresentable {
                 args: ["-l"],
                 currentDirectory: workingDirectory
             )
+            if let startupCommand, terminalView.process?.running == true {
+                let bytes = Array((startupCommand + "\n").utf8)
+                terminalView.send(data: bytes[...])
+            }
         }
 
         logInfo("TerminalRepresentable.updateNSView: marking entry as running")

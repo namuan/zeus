@@ -393,11 +393,8 @@ struct NewTaskSheet: View {
             workingDirectory: project.directoryURL,
             status: .idle
         )
-        appDatabase.insertTask(task)
-
         guard createWorktree else {
-            dismiss()
-            onCreated?(task)
+            saveTask(task)
             return
         }
 
@@ -435,19 +432,35 @@ struct NewTaskSheet: View {
                     config: worktreeConfig,
                     branchSource: branchSource
                 )
-                if var updated = appDatabase.task(id: task.id) {
-                    updated.worktreePath = result.path
-                    updated.worktreeBranch = result.branch
-                    updated.worktreeBranchIsOwned = branchIsOwned
-                    appDatabase.updateTask(updated)
-                    task = updated
+                task.worktreePath = result.path
+                task.worktreeBranch = result.branch
+                task.worktreeBranchIsOwned = branchIsOwned
+                if !saveTask(task) {
+                    await service.removeWorktree(
+                        worktreePath: result.path,
+                        repoPath: worktreeRequest.repoPath,
+                        branchName: result.branch,
+                        deleteBranch: branchIsOwned
+                    )
+                    isCreatingWorktree = false
                 }
-                dismiss()
-                onCreated?(task)
             } catch {
                 isCreatingWorktree = false
                 worktreeErrorMessage = error.localizedDescription
             }
+        }
+    }
+
+    @discardableResult
+    private func saveTask(_ task: AgentTask) -> Bool {
+        do {
+            try appDatabase.insertNewTask(task)
+            dismiss()
+            onCreated?(task)
+            return true
+        } catch {
+            worktreeErrorMessage = error.localizedDescription
+            return false
         }
     }
 }

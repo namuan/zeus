@@ -125,6 +125,15 @@ final class AppDatabase: ObservableObject {
                 t.add(column: "worktreeBranchIsOwned", .integer).notNull().defaults(to: 1)
             }
         }
+        migrator.registerMigration("v15") { db in
+            try db.alter(table: "projects") { t in
+                t.add(column: "startupCommandId", .text).references("savedCommands", onDelete: .setNull)
+            }
+            try db.create(table: "taskStartupCommands") { t in
+                t.primaryKey("taskId", .text).references("tasks", onDelete: .cascade)
+                t.column("command", .text).notNull()
+            }
+        }
         try migrator.migrate(db)
         // Remove stale records left by abandoned-branch migrations (v5, v9, v10).
         // These were never part of the canonical schema; deleting them keeps
@@ -191,6 +200,22 @@ final class AppDatabase: ObservableObject {
         try? dbQueue.write { db in try project.insert(db) }
     }
 
+    func setStartupCommand(_ commandID: UUID?, for projectID: UUID) throws {
+        try dbQueue.write { db in
+            if let commandID {
+                guard let command = try SavedCommand.fetchOne(db, key: commandID.uuidString),
+                      command.isGlobal || command.projectID == projectID,
+                      TaskStartupCommand.isValid(command.command) else {
+                    throw TaskStartupCommand.ConfigurationError.invalidCommand
+                }
+            }
+            try db.execute(
+                sql: "UPDATE projects SET startupCommandId = ? WHERE id = ?",
+                arguments: [commandID?.uuidString, projectID.uuidString]
+            )
+        }
+    }
+
     func deleteProject(id: UUID) {
         try? dbQueue.write { db in
             try db.execute(sql: "UPDATE projects SET isDeleted = 1 WHERE id = ?", arguments: [id.uuidString])
@@ -209,6 +234,36 @@ final class AppDatabase: ObservableObject {
 
     func insertTask(_ task: AgentTask) {
         try? dbQueue.write { db in try task.insert(db) }
+    }
+
+    func insertNewTask(_ task: AgentTask) throws {
+        try dbQueue.write { db in
+            try task.insert(db)
+            let command = try String.fetchOne(db, sql: """
+                SELECT savedCommands.command FROM projects
+                JOIN savedCommands ON savedCommands.id = projects.startupCommandId
+                WHERE projects.id = ?
+                    AND (savedCommands.projectId IS NULL OR savedCommands.projectId = projects.id)
+                """, arguments: [task.projectID.uuidString])
+            if let command, TaskStartupCommand.isValid(command) {
+                try db.execute(
+                    sql: "INSERT INTO taskStartupCommands (taskId, command) VALUES (?, ?)",
+                    arguments: [task.id.uuidString, command.trimmingCharacters(in: .whitespaces)]
+                )
+            }
+        }
+    }
+
+    func takeTaskStartupCommand(taskID: UUID) throws -> String? {
+        try dbQueue.write { db in
+            let command = try String.fetchOne(db, sql: """
+                SELECT command FROM taskStartupCommands
+                WHERE taskId = ? AND taskId IN (SELECT id FROM tasks WHERE isArchived = 0)
+                """, arguments: [taskID.uuidString])
+            guard let command else { return nil }
+            try db.execute(sql: "DELETE FROM taskStartupCommands WHERE taskId = ?", arguments: [taskID.uuidString])
+            return command
+        }
     }
 
     func updateTask(_ task: AgentTask) {
