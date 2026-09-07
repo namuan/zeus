@@ -1,0 +1,1 @@
+Add project settings to choose a project or global Quick Command for New Task. Snapshot the command on task creation and consume it atomically on the first terminal launch. Preserve task selection, run in the worktree when available, and leave Quick Task and additional terminals or panes unchanged. Validate with 93 passing tests, SwiftLint, and headless light/dark layout checks.
