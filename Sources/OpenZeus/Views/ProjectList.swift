@@ -8,6 +8,7 @@ struct ProjectList: View {
     let activeTaskID: UUID?
 
     @State private var projectToDelete: Project?
+    @State private var projectToConfigure: Project?
     @State private var searchText = ""
     @State private var clipboardError: String?
     @State private var showOnlyActive = false
@@ -40,7 +41,8 @@ struct ProjectList: View {
                         onSelect: { selection = project },
                         onRemove: { projectToDelete = project },
                         onOpenInFinder: { openInFinder(project) },
-                        onOpenInTerminal: { openInTerminal(project) }
+                        onOpenInTerminal: { openInTerminal(project) },
+                        onConfigure: { projectToConfigure = project }
                     )
             }
             .onDelete(perform: deleteProjects)
@@ -73,6 +75,9 @@ struct ProjectList: View {
                     Label("Add Project", systemImage: "plus")
                 }
             }
+        }
+        .sheet(item: $projectToConfigure) { project in
+            ProjectSettingsSheet(project: project)
         }
         .confirmationDialog(
             "Delete \"\(projectToDelete?.name ?? "Project")\"?",
@@ -193,6 +198,7 @@ private struct ProjectRow: View {
     let onRemove: () -> Void
     let onOpenInFinder: () -> Void
     let onOpenInTerminal: () -> Void
+    let onConfigure: () -> Void
 
     @State private var isHovered = false
 
@@ -236,6 +242,10 @@ private struct ProjectRow: View {
         .onTapGesture { onSelect() }
         .onHover { isHovered = $0 }
         .contextMenu {
+            Button(action: onConfigure) {
+                Label("Project Settings…", systemImage: "gearshape")
+            }
+            Divider()
             Button(action: onOpenInFinder) {
                 Label("Open in Finder", systemImage: "folder")
             }
