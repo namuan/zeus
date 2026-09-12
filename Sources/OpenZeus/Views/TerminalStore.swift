@@ -218,14 +218,15 @@ final class TerminalEntry: ObservableObject {
             return
         }
 
-        var args = ["new-window", "-t", sessionName]
-        if !workingDirectory.isEmpty {
-            args += ["-c", workingDirectory]
-            logDebug("openWindow: using working directory '\(workingDirectory)'")
-        }
-        logInfo("openWindow: executing \(tmux) \(args.joined(separator: " "))")
-
         Task {
+            let directory = await currentPaneDirectory(using: tmux)
+            var args = ["new-window", "-t", sessionName]
+            if !directory.isEmpty {
+                args += ["-c", directory]
+                logDebug("openWindow: using current pane directory '\(directory)'")
+            }
+            logInfo("openWindow: executing \(tmux) \(args.joined(separator: " "))")
+
             let output = await runProcessOutput(tmux, args: args)
             logInfo("openWindow: tmux new-window completed, output='\(output)'")
 
@@ -299,13 +300,15 @@ final class TerminalEntry: ObservableObject {
             return
         }
 
-        var args = ["split-window", direction, "-t", sessionName]
-        if !workingDirectory.isEmpty {
-            args += ["-c", workingDirectory]
-        }
-        logDebug("splitPane: executing \(tmux) \(args.joined(separator: " "))")
-
         Task {
+            let directory = await currentPaneDirectory(using: tmux)
+            var args = ["split-window", direction, "-t", sessionName]
+            if !directory.isEmpty {
+                args += ["-c", directory]
+                logDebug("splitPane: using current pane directory '\(directory)'")
+            }
+            logDebug("splitPane: executing \(tmux) \(args.joined(separator: " "))")
+
             let output = await runProcessOutput(tmux, args: args)
             logDebug("splitPane: tmux output='\(output)'")
 
@@ -419,6 +422,14 @@ final class TerminalEntry: ObservableObject {
         }
     }
 
+    private func currentPaneDirectory(using tmux: String) async -> String {
+        let output = await runProcessOutput(tmux, args: [
+            "display-message", "-p", "-t", sessionName, "#{pane_current_path}"
+        ])
+        let directory = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        return directory.isEmpty ? workingDirectory : directory
+    }
+
     func sendCommand(_ command: String, inNewVerticalPane: Bool = false) {
         let expandedCommand = ZeusCommandVariables.expand(command, projectDirectory: projectDirectory)
         logInfo("sendCommand: '\(command)', inNewVerticalPane=\(inNewVerticalPane), tmuxUnavailable=\(tmuxUnavailable)")
@@ -453,9 +464,10 @@ final class TerminalEntry: ObservableObject {
 
     private func createVerticalPane(using tmux: String, sessionName: String) async -> String {
         logDebug("createVerticalPane: session=\(sessionName)")
+        let directory = await currentPaneDirectory(using: tmux)
         var args = ["split-window", "-h", "-P", "-F", "#{pane_id}", "-t", sessionName]
-        if !workingDirectory.isEmpty {
-            args += ["-c", workingDirectory]
+        if !directory.isEmpty {
+            args += ["-c", directory]
         }
         let output = await runProcessOutput(tmux, args: args)
         let paneID = output.trimmingCharacters(in: .whitespacesAndNewlines)

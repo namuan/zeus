@@ -463,6 +463,55 @@ private func killTmuxSessionSync(_ tmux: String, sessionName: String) {
     killTmuxSessionSync(tmux, sessionName: sessionName)
 }
 
+@Test @MainActor func terminalEntrySplitPaneUsesActivePaneDirectoryTest() async {
+    guard let tmux = tmuxExecutable() else {
+        return
+    }
+
+    let taskID = UUID()
+    let sessionName = "zeus-\(taskID.uuidString)"
+    let baseDirectory = NSTemporaryDirectory()
+    let activeDirectoryURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("zeus-cwd-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: activeDirectoryURL, withIntermediateDirectories: true)
+    let activeDirectory = activeDirectoryURL.resolvingSymlinksInPath().path
+
+    _ = await runProcessOutput(tmux, args: [
+        "new-session", "-d", "-s", sessionName, "-c", baseDirectory, "/bin/bash"
+    ])
+    _ = await runProcessOutput(tmux, args: [
+        "send-keys", "-t", sessionName, "cd \(activeDirectory)", "Enter"
+    ])
+    try? await Task.sleep(for: .milliseconds(200))
+
+    let entry = TerminalEntry(taskID: taskID)
+    entry.workingDirectory = baseDirectory
+    entry.splitHorizontal()
+
+    var paneDirectories: [String] = []
+    for _ in 0..<20 {
+        paneDirectories = await runProcessOutput(tmux, args: [
+            "list-panes", "-t", sessionName, "-F", "#{pane_current_path}"
+        ])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: "\n")
+            .map(String.init)
+        if paneDirectories.count == 2 {
+            break
+        }
+        try? await Task.sleep(for: .milliseconds(100))
+    }
+
+    let normalizedPaneDirectories = paneDirectories.map {
+        $0.hasPrefix("/private/") ? String($0.dropFirst("/private".count)) : $0
+    }
+    #expect(normalizedPaneDirectories.count == 2)
+    #expect(normalizedPaneDirectories.allSatisfy { $0 == activeDirectory })
+
+    killTmuxSessionSync(tmux, sessionName: sessionName)
+    try? FileManager.default.removeItem(atPath: activeDirectory)
+}
+
 @Test @MainActor func tmuxPaneSplitVerticalTest() async {
     guard let tmux = tmuxExecutable() else {
         return  // Skip if tmux not installed
