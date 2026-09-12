@@ -1,0 +1,1 @@
+Detect each task terminal pane directory before creating new windows or splits, with a configured-directory fallback; add integration coverage.
