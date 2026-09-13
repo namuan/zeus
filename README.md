@@ -30,6 +30,7 @@ Native macOS AI agent orchestrator. Visual control plane for managing fleets of 
 ### Git Worktrees
 
 - **Automatic creation** — optionally create a worktree per task with auto-generated branch names
+- **Active-pane creation** — create a UUID-named worktree from a task terminal’s active pane and switch that pane into it
 - **Cleanup scanner** — settings tab finds orphaned worktree directories, stale references, and archived-task worktrees
 - **Branch badges** — tasks with worktrees display their branch name
 
@@ -39,6 +40,7 @@ Native macOS AI agent orchestrator. Visual control plane for managing fleets of 
 - **Task archiving** — hide completed tasks; optionally kill tmux session and remove worktree on archive
 - **Context menus** — Open in Finder, Open in Terminal, Delete
 - **Task editing** — edit task descriptions via inline pencil button
+- **Active-pane worktrees** — the terminal’s worktree button is available for normal and Quick Tasks when tmux is available and the active pane is idle
 - **Active badges** — open task count and running process indicators per project
 
 ### App Launcher

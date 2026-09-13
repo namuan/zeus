@@ -131,17 +131,25 @@ struct TaskList: View {
     }
 
     private func removeWorktreeIfNeeded(for task: AgentTask) {
-        guard let worktreePath = task.worktreePath,
-              let worktreeBranch = task.worktreeBranch else { return }
-        let repoPath = project.directoryURL.path(percentEncoded: false)
+        let repoPath = task.workingDirectory.path(percentEncoded: false)
         let service = WorktreeService(gitExecutablePath: appConfig.git.executablePath)
         Task {
-            await service.removeWorktree(
-                worktreePath: worktreePath,
-                repoPath: repoPath,
-                branchName: worktreeBranch,
-                deleteBranch: task.worktreeBranchIsOwned
-            )
+            if let worktreePath = task.worktreePath,
+               let worktreeBranch = task.worktreeBranch {
+                await service.removeWorktree(
+                    worktreePath: worktreePath,
+                    repoPath: repoPath,
+                    branchName: worktreeBranch,
+                    deleteBranch: task.worktreeBranchIsOwned
+                )
+            } else if !appConfig.worktree.resolvedBasePath.isEmpty {
+                await service.removeTaskWorktree(
+                    taskID: task.id,
+                    projectName: project.name,
+                    repoPath: repoPath,
+                    config: appConfig.worktree
+                )
+            }
         }
     }
 

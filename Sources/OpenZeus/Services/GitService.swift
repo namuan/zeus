@@ -473,11 +473,18 @@ func runGitCommand(args: [String], in workingDirectory: String, executablePath: 
     process.standardOutput = outputPipe
     process.standardError = errorPipe
 
+    let (terminationStream, terminationContinuation) = AsyncStream<Int32>.makeStream()
+    process.terminationHandler = { process in
+        terminationContinuation.yield(process.terminationStatus)
+        terminationContinuation.finish()
+    }
+
     do {
         try process.run()
     } catch {
         outputPipe.fileHandleForReading.closeFile()
         errorPipe.fileHandleForReading.closeFile()
+        terminationContinuation.finish()
         return GitCommandResult(
             success: false,
             output: "",
@@ -490,18 +497,23 @@ func runGitCommand(args: [String], in workingDirectory: String, executablePath: 
     // waiting for a reader (which would stall the process indefinitely on > ~64 KB output).
     let outputFH = outputPipe.fileHandleForReading
     let errorFH = errorPipe.fileHandleForReading
-    async let outputData: Data = outputFH.readDataToEndOfFile()
-    async let errorData: Data = errorFH.readDataToEndOfFile()
-    let (out, err) = await (outputData, errorData)
-    process.waitUntilExit()
+    let outputTask = Task.detached { outputFH.readDataToEndOfFile() }
+    let errorTask = Task.detached { errorFH.readDataToEndOfFile() }
+    let (out, err) = await (outputTask.value, errorTask.value)
+    var terminationStatus: Int32?
+    for await status in terminationStream {
+        terminationStatus = status
+        break
+    }
+    let status = terminationStatus ?? -1
 
     // Trim only newlines, not spaces — leading spaces are significant
     // in git porcelain output (they form the XY status columns).
     return GitCommandResult(
-        success: process.terminationStatus == 0,
+        success: status == 0,
         output: (String(data: out, encoding: .utf8) ?? "").trimmingCharacters(in: .newlines),
         error: (String(data: err, encoding: .utf8) ?? "").trimmingCharacters(in: .newlines),
-        exitCode: Int(process.terminationStatus)
+        exitCode: Int(status)
     )
 }
 

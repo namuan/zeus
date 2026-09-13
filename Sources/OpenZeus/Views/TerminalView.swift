@@ -16,6 +16,8 @@ struct TerminalPane: View {
             command: task.command,
             workingDirectory: task.effectiveWorkingDirectory,
             navigationTitle: task.name,
+            projectName: projectName,
+            task: task,
             entry: terminalStore.entry(for: task.id, recordTranscript: true)
         )
         .onAppear {
@@ -51,6 +53,8 @@ struct NoTaskDetailPane: View {
             command: "",
             workingDirectory: cwd,
             navigationTitle: project.name,
+            projectName: project.name,
+            task: nil,
             entry: terminalStore.entry(for: project.id),
             autoStart: false
         )
@@ -73,19 +77,25 @@ private struct TerminalPaneContent: View {
     let command: String
     let workingDirectory: String
     let navigationTitle: String
+    let projectName: String
+    let task: AgentTask?
     @ObservedObject var entry: TerminalEntry
     @State private var terminalVisible: Bool
+    @State private var activeWorkingDirectory: String
     @Environment(\.appConfig) private var appConfig
 
     init(sessionID: UUID, projectID: UUID, command: String, workingDirectory: String,
-         navigationTitle: String, entry: TerminalEntry, autoStart: Bool = true) {
+         navigationTitle: String, projectName: String, task: AgentTask?, entry: TerminalEntry, autoStart: Bool = true) {
         self.sessionID = sessionID
         self.projectID = projectID
         self.command = command
         self.workingDirectory = workingDirectory
         self.navigationTitle = navigationTitle
+        self.projectName = projectName
+        self.task = task
         self._entry = ObservedObject(wrappedValue: entry)
         self._terminalVisible = State(initialValue: autoStart)
+        self._activeWorkingDirectory = State(initialValue: workingDirectory)
     }
 
     var body: some View {
@@ -93,13 +103,16 @@ private struct TerminalPaneContent: View {
             if !entry.tmuxUnavailable {
                 WindowControlBar(
                     entry: entry,
+                    task: task,
                     projectID: projectID,
-                    workingDirectory: workingDirectory,
-                    terminalVisible: $terminalVisible
+                    projectName: projectName,
+                    workingDirectory: activeWorkingDirectory,
+                    terminalVisible: $terminalVisible,
+                    onWorkingDirectoryChanged: { activeWorkingDirectory = $0 }
                 )
                 Divider()
             }
-            AppLauncherBar(entry: entry, projectID: projectID, workingDirectory: workingDirectory)
+            AppLauncherBar(entry: entry, projectID: projectID, workingDirectory: activeWorkingDirectory)
             Divider()
             if entry.tmuxUnavailable {
                 Label("tmux not found — sessions won't persist", systemImage: "exclamationmark.triangle")
@@ -117,6 +130,16 @@ private struct TerminalPaneContent: View {
             }
         }
         .navigationTitle(navigationTitle)
+        .task(id: entry.isRunning) {
+            guard entry.isRunning else { return }
+            let directory = await entry.currentPaneDirectory(fallback: workingDirectory)
+            activeWorkingDirectory = directory
+        }
+        .onChange(of: entry.activePaneDirectory) { _, directory in
+            if !directory.isEmpty {
+                activeWorkingDirectory = directory
+            }
+        }
     }
 }
 
@@ -170,22 +193,39 @@ private struct WindowControlBar: View {
     private static let terminalBarCommandsStorageKey = "terminalBarCommands"
 
     @ObservedObject var entry: TerminalEntry
+    let task: AgentTask?
     let projectID: UUID
+    let projectName: String
     let workingDirectory: String
     @Binding var terminalVisible: Bool
+    let onWorkingDirectoryChanged: (String) -> Void
     @EnvironmentObject var db: AppDatabase
     @EnvironmentObject var terminalStore: TerminalStore
     @Environment(\.appConfig) private var appConfig
     @State private var showCommands = false
     @State private var terminalBarCommandEditor: TerminalBarCommandEditorState?
     @State private var terminalBarCommands: [TerminalBarCommand]
+    @State private var isCreatingWorktree = false
+    @State private var activePaneIsLinkedWorktree = false
+    @State private var worktreeErrorMessage: String?
 
-    init(entry: TerminalEntry, projectID: UUID, workingDirectory: String, terminalVisible: Binding<Bool>) {
+    init(
+        entry: TerminalEntry,
+        task: AgentTask?,
+        projectID: UUID,
+        projectName: String,
+        workingDirectory: String,
+        terminalVisible: Binding<Bool>,
+        onWorkingDirectoryChanged: @escaping (String) -> Void
+    ) {
         logDebug("WindowControlBar.init: projectID=\(projectID), windows.count=\(entry.windows.count)")
         self._entry = ObservedObject(wrappedValue: entry)
+        self.task = task
         self.projectID = projectID
+        self.projectName = projectName
         self.workingDirectory = workingDirectory
         self._terminalVisible = terminalVisible
+        self.onWorkingDirectoryChanged = onWorkingDirectoryChanged
         self._terminalBarCommands = State(initialValue: Self.loadTerminalBarCommands(for: projectID))
     }
 
@@ -209,6 +249,20 @@ private struct WindowControlBar: View {
             }
             .buttonStyle(.borderless)
             .padding(.trailing, 10)
+        }
+        .task(id: "\(entry.isRunning)-\(entry.currentWindowIndex)-\(entry.activePaneDirectory)") {
+            await refreshWorktreeAvailability()
+        }
+        .alert(
+            "Could Not Create Worktree",
+            isPresented: Binding(
+                get: { worktreeErrorMessage != nil },
+                set: { if !$0 { worktreeErrorMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(worktreeErrorMessage ?? "")
         }
     }
 
@@ -297,6 +351,22 @@ private struct WindowControlBar: View {
         }
         .help("Pop Out to Terminal.app")
 
+        if task != nil {
+            Button {
+                logInfo("WindowControlBar: worktree button clicked for task \(task?.id.uuidString ?? "unknown")")
+                Task { await createTaskWorktree() }
+            } label: {
+                if isCreatingWorktree {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: "square.split.2x1")
+                }
+            }
+            .disabled(!canCreateTaskWorktree)
+            .help(taskWorktreeHelp)
+        }
+
         Divider().frame(height: 16)
 
         Button {
@@ -313,6 +383,120 @@ private struct WindowControlBar: View {
                 showCommands = false
             }
             .environmentObject(db)
+        }
+    }
+
+    private var canCreateTaskWorktree: Bool {
+        task != nil
+            && entry.isRunning
+            && !entry.tmuxUnavailable
+            && !appConfig.worktree.resolvedBasePath.isEmpty
+            && !entry.hasActiveProcess
+            && !activePaneIsLinkedWorktree
+            && !isCreatingWorktree
+    }
+
+    private var taskWorktreeHelp: String {
+        if appConfig.worktree.resolvedBasePath.isEmpty {
+            return "Configure a worktree base path in Settings"
+        }
+        if activePaneIsLinkedWorktree {
+            return "The active pane is already in a Git worktree"
+        }
+        if entry.hasActiveProcess {
+            return "Wait for the active process to finish before creating a worktree"
+        }
+        return "Create task worktree and switch this pane"
+    }
+
+    private func refreshWorktreeAvailability() async {
+        guard task != nil, entry.isRunning, !entry.tmuxUnavailable else {
+            activePaneIsLinkedWorktree = false
+            return
+        }
+        let directory = await entry.currentPaneDirectory(fallback: workingDirectory)
+        onWorkingDirectoryChanged(directory)
+        let service = WorktreeService(gitExecutablePath: appConfig.git.executablePath)
+        activePaneIsLinkedWorktree = (try? await service.repository(at: directory).isLinkedWorktree) ?? false
+        logDebug("WindowControlBar: worktree availability task=\(task?.id.uuidString ?? "unknown"), directory='\(directory)', linked=\(activePaneIsLinkedWorktree), activeProcess=\(entry.hasActiveProcess)")
+    }
+
+    private func createTaskWorktree() async {
+        guard let task, canCreateTaskWorktree else { return }
+        isCreatingWorktree = true
+        defer { isCreatingWorktree = false }
+        let service = WorktreeService(gitExecutablePath: appConfig.git.executablePath)
+        let activeDirectory = await entry.currentPaneDirectory(fallback: workingDirectory)
+        logInfo("WindowControlBar: creating worktree for task \(task.id.uuidString) from active directory '\(activeDirectory)'")
+        do {
+            let repository = try await service.repository(at: activeDirectory)
+            guard !repository.isLinkedWorktree else {
+                activePaneIsLinkedWorktree = true
+                return
+            }
+            let result: WorktreeResult
+            let createdWorktree: Bool
+            if let existing = await service.existingTaskWorktree(
+                taskID: task.id,
+                projectName: projectName,
+                repoPath: repository.rootPath,
+                config: appConfig.worktree
+            ) {
+                result = existing
+                createdWorktree = false
+            } else {
+                result = try await service.createTaskWorktree(
+                    taskID: task.id,
+                    projectName: projectName,
+                    repoPath: repository.rootPath,
+                    config: appConfig.worktree
+                )
+                createdWorktree = true
+            }
+            guard !entry.hasActiveProcess else {
+                if createdWorktree {
+                    await service.removeWorktree(
+                        worktreePath: result.path,
+                        repoPath: repository.rootPath,
+                        branchName: result.branch,
+                        deleteBranch: true
+                    )
+                }
+                throw WorktreeError.gitCommandFailed("The active pane started a process before it could switch directories.")
+            }
+            guard await entry.changeDirectory(to: result.path) else {
+                if createdWorktree {
+                    await service.removeWorktree(
+                        worktreePath: result.path,
+                        repoPath: repository.rootPath,
+                        branchName: result.branch,
+                        deleteBranch: true
+                    )
+                }
+                throw WorktreeError.gitCommandFailed("tmux is unavailable.")
+            }
+            try? await Task.sleep(for: .milliseconds(appConfig.terminal.tmuxSettleDelayMs))
+            let updatedDirectory = await entry.currentPaneDirectory(fallback: activeDirectory)
+            guard WorktreeService.pathsReferToSameLocation(updatedDirectory, result.path) else {
+                if createdWorktree {
+                    await service.removeWorktree(
+                        worktreePath: result.path,
+                        repoPath: repository.rootPath,
+                        branchName: result.branch,
+                        deleteBranch: true
+                    )
+                }
+                throw WorktreeError.gitCommandFailed("The terminal could not switch to the new worktree.")
+            }
+            entry.workingDirectory = updatedDirectory
+            terminalStore.removeGitService(for: workingDirectory)
+            onWorkingDirectoryChanged(updatedDirectory)
+            activePaneIsLinkedWorktree = true
+            let action = createdWorktree ? "created" : "reusing existing"
+            logInfo("WindowControlBar: worktree \(action) at '\(result.path)' on branch '\(result.branch)'")
+        } catch {
+            logError("WindowControlBar: worktree creation failed: \(error.localizedDescription)")
+            worktreeErrorMessage = error.localizedDescription
         }
     }
 
@@ -1256,6 +1440,9 @@ private struct TerminalRepresentable: NSViewRepresentable {
         entry.applyTheme(terminalConfig.theme, systemColorScheme: colorScheme)
 
         if terminalView.process?.running == true {
+            if !entry.isRunning {
+                entry.isRunning = true
+            }
             if let sessionName = container.sessionName, let tmux = tmuxExecutable(searchPaths: terminalConfig.tmuxSearchPaths) {
                 Task {
                     try? await Task.sleep(for: .milliseconds(terminalConfig.mouseModeDelayMs))
