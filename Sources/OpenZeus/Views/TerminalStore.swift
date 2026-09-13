@@ -48,6 +48,9 @@ final class TerminalEntry: ObservableObject {
     @Published var paneCount: Int = 1 {
         didSet { logDebug("paneCount changed: \(paneCount)") }
     }
+    @Published var activePaneDirectory: String = "" {
+        didSet { logDebug("activePaneDirectory changed: '\(activePaneDirectory)'") }
+    }
     @Published var mouseReportingEnabled: Bool = true {
         didSet { logDebug("mouseReportingEnabled changed: \(mouseReportingEnabled)") }
     }
@@ -131,11 +134,20 @@ final class TerminalEntry: ObservableObject {
         async let panesFuture = runProcessOutput(tmux, args: [
             "list-panes", "-t", sessionName,
         ])
-        let (paneOutput, windowsOutput, panesOutput) = await (paneFuture, windowsFuture, panesFuture)
+        async let directoryFuture = runProcessOutput(tmux, args: [
+            "display-message", "-p", "-t", sessionName, "#{pane_current_path}",
+        ])
+        let (paneOutput, windowsOutput, panesOutput, directoryOutput) = await (
+            paneFuture, windowsFuture, panesFuture, directoryFuture
+        )
 
         logDebug("checkActiveProcess: paneOutput='\(paneOutput)'")
         logDebug("checkActiveProcess: windowsOutput='\(windowsOutput)'")
         logDebug("checkActiveProcess: panesOutput='\(panesOutput)'")
+        let directory = directoryOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !directory.isEmpty, activePaneDirectory != directory {
+            activePaneDirectory = directory
+        }
 
         let paneInfo = parseActivePaneInfo(paneOutput)
         let command = paneInfo.command
@@ -435,6 +447,18 @@ final class TerminalEntry: ObservableObject {
         ])
         let directory = output.trimmingCharacters(in: .whitespacesAndNewlines)
         return directory.isEmpty ? (fallback ?? workingDirectory) : directory
+    }
+
+    func changeDirectory(to directory: String) async -> Bool {
+        guard !tmuxUnavailable,
+              let tmux = tmuxExecutable(searchPaths: config.tmuxSearchPaths) else {
+            return false
+        }
+        let quotedDirectory = "'\(directory.replacingOccurrences(of: "'", with: "'\"'\"'"))'"
+        let command = "cd -- \(quotedDirectory)"
+        await runProcessOutput(tmux, args: ["send-keys", "-t", sessionName, "-l", "--", command])
+        await runProcessOutput(tmux, args: ["send-keys", "-t", sessionName, "Enter"])
+        return true
     }
 
     func sendCommand(_ command: String, inNewVerticalPane: Bool = false) {

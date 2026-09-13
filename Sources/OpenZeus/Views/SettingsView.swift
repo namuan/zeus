@@ -507,23 +507,38 @@ private struct WorktreeTab: View {
         }
 
         for task in appDatabase.tasks {
-            guard let path = task.worktreePath else { continue }
-            if task.isArchived {
-                if FileManager.default.fileExists(atPath: path) {
-                    found.append(CleanupItem(
-                        kind: .archivedTaskWithWorktree(task: task),
-                        title: "Archived task with live worktree",
-                        detail: path,
-                        reason: "Task \"\(task.name)\" is archived but its worktree still exists on disk"
-                    ))
-                }
-            } else {
-                if !FileManager.default.fileExists(atPath: path) {
+            if let path = task.worktreePath {
+                if task.isArchived {
+                    if FileManager.default.fileExists(atPath: path) {
+                        found.append(CleanupItem(
+                            kind: .archivedTaskWithWorktree(task: task),
+                            title: "Archived task with live worktree",
+                            detail: path,
+                            reason: "Task \"\(task.name)\" is archived but its worktree still exists on disk"
+                        ))
+                    }
+                } else if !FileManager.default.fileExists(atPath: path) {
                     found.append(CleanupItem(
                         kind: .staleWorktreeReference(task: task),
                         title: "Stale worktree reference",
                         detail: path,
                         reason: "Task \"\(task.name)\" references a worktree path that no longer exists on disk"
+                    ))
+                }
+            } else if task.isArchived,
+                      let project = appDatabase.projects.first(where: { $0.id == task.projectID }),
+                      !config.resolvedBasePath.isEmpty {
+                let path = WorktreeService.taskWorktreePath(
+                    taskID: task.id,
+                    projectName: project.name,
+                    config: config
+                )
+                if FileManager.default.fileExists(atPath: path) {
+                    found.append(CleanupItem(
+                        kind: .archivedTaskWithDerivedWorktree(task: task),
+                        title: "Archived task with live worktree",
+                        detail: path,
+                        reason: "Task \"\(task.name)\" is archived but its terminal-created worktree still exists on disk"
                     ))
                 }
             }
@@ -549,12 +564,15 @@ private struct WorktreeTab: View {
                     guard fm.fileExists(atPath: taskPath, isDirectory: &isDir), isDir.boolValue else { continue }
 
                     let taskExists = dbTasks.contains(taskUUID)
-                    if !projectExists && !taskExists {
+                    if !taskExists {
+                        let reason = projectExists
+                            ? "No task with ID \(taskUUID.prefix(8))… exists in the database"
+                            : "No project '\(projectSlug)' or task \(taskUUID.prefix(8))… exists in the database"
                         found.append(CleanupItem(
                             kind: .orphanedWorktreeDirectory(path: taskPath, projectSlug: projectSlug, taskUUID: taskUUID),
                             title: "Orphaned worktree directory",
                             detail: taskPath,
-                            reason: "No project '\(projectSlug)' or task \(taskUUID.prefix(8))… exists in the database"
+                            reason: reason
                         ))
                     }
                 }
@@ -610,6 +628,16 @@ private struct WorktreeTab: View {
             updated.worktreePath = nil
             updated.worktreeBranch = nil
             appDatabase.updateTask(updated)
+
+        case .archivedTaskWithDerivedWorktree(let task):
+            guard let project = appDatabase.projects.first(where: { $0.id == task.projectID }) else { break }
+            let service = WorktreeService(gitExecutablePath: gitExecutablePath)
+            await service.removeTaskWorktree(
+                taskID: task.id,
+                projectName: project.name,
+                repoPath: task.workingDirectory.path(percentEncoded: false),
+                config: config
+            )
 
         case .staleWorktreeReference(let task):
             var updated = task
@@ -800,6 +828,7 @@ private struct LLMTab: View {
 private enum CleanupItemKind {
     case orphanedTmuxSession(sessionName: String)
     case archivedTaskWithWorktree(task: AgentTask)
+    case archivedTaskWithDerivedWorktree(task: AgentTask)
     case staleWorktreeReference(task: AgentTask)
     case orphanedWorktreeDirectory(path: String, projectSlug: String?, taskUUID: String?)
 }
@@ -813,7 +842,7 @@ private struct CleanupItem: Identifiable {
     var tagColor: Color {
         switch kind {
         case .orphanedTmuxSession: .red
-        case .archivedTaskWithWorktree: .orange
+        case .archivedTaskWithWorktree, .archivedTaskWithDerivedWorktree: .orange
         case .staleWorktreeReference: .secondary
         case .orphanedWorktreeDirectory: .red
         }
@@ -821,7 +850,7 @@ private struct CleanupItem: Identifiable {
     var tagLabel: String {
         switch kind {
         case .orphanedTmuxSession: "tmux"
-        case .archivedTaskWithWorktree: "worktree"
+        case .archivedTaskWithWorktree, .archivedTaskWithDerivedWorktree: "worktree"
         case .staleWorktreeReference: "stale ref"
         case .orphanedWorktreeDirectory: "orphaned"
         }

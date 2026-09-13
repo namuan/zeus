@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 // MARK: - Types
@@ -5,6 +6,11 @@ import Foundation
 struct WorktreeResult: Sendable {
     let path: String
     let branch: String
+}
+
+struct WorktreeRepository: Sendable, Equatable {
+    let rootPath: String
+    let isLinkedWorktree: Bool
 }
 
 struct WorktreeRequest: Sendable {
@@ -32,6 +38,7 @@ struct WorktreeBranchOption: Identifiable, Sendable {
 
 enum WorktreeError: LocalizedError {
     case notConfigured
+    case notRepository(String)
     case defaultBranchUnavailable(String)
     case gitCommandFailed(String)
     case directoryCreationFailed(String)
@@ -40,6 +47,8 @@ enum WorktreeError: LocalizedError {
         switch self {
         case .notConfigured:
             return "Worktree base path is not configured. Set it in Settings > Worktree."
+        case .notRepository(let path):
+            return "No Git repository was found for: \(path)"
         case .defaultBranchUnavailable(let details):
             return "Could not determine the repository default branch: \(details)"
         case .gitCommandFailed(let details):
@@ -71,6 +80,74 @@ final class WorktreeService: Sendable {
     }
 
     // MARK: - Public API
+
+    func repository(at directory: String) async throws -> WorktreeRepository {
+        let result = await runGit(args: ["rev-parse", "--show-toplevel"], in: directory)
+        guard result.success else {
+            throw WorktreeError.notRepository(directory)
+        }
+        let rootPath = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rootPath.isEmpty else {
+            throw WorktreeError.notRepository(directory)
+        }
+        var isDirectory: ObjCBool = false
+        let gitMarkerPath = URL(fileURLWithPath: rootPath).appendingPathComponent(".git").path
+        guard FileManager.default.fileExists(atPath: gitMarkerPath, isDirectory: &isDirectory) else {
+            throw WorktreeError.notRepository(directory)
+        }
+        return WorktreeRepository(rootPath: rootPath, isLinkedWorktree: !isDirectory.boolValue)
+    }
+
+    func createTaskWorktree(
+        taskID: UUID,
+        projectName: String,
+        repoPath: String,
+        config: WorktreeConfig
+    ) async throws -> WorktreeResult {
+        try await createWorktree(
+            request: WorktreeRequest(
+                taskID: taskID,
+                taskName: Self.taskBranchName(for: taskID),
+                repoPath: repoPath,
+                projectSlug: Self.projectSlug(from: projectName)
+            ),
+            config: config,
+            branchSource: .newBranch(name: Self.taskBranchName(for: taskID))
+        )
+    }
+
+    func existingTaskWorktree(
+        taskID: UUID,
+        projectName: String,
+        repoPath: String,
+        config: WorktreeConfig
+    ) async -> WorktreeResult? {
+        let worktreePath = Self.taskWorktreePath(taskID: taskID, projectName: projectName, config: config)
+        let branchName = Self.taskBranchName(for: taskID)
+        guard await containsWorktree(worktreePath: worktreePath, branchName: branchName, repoPath: repoPath) else {
+            return nil
+        }
+        return WorktreeResult(path: worktreePath, branch: branchName)
+    }
+
+    func removeTaskWorktree(
+        taskID: UUID,
+        projectName: String,
+        repoPath: String,
+        config: WorktreeConfig
+    ) async {
+        let worktreePath = Self.taskWorktreePath(taskID: taskID, projectName: projectName, config: config)
+        let branchName = Self.taskBranchName(for: taskID)
+        guard await containsWorktree(worktreePath: worktreePath, branchName: branchName, repoPath: repoPath) else {
+            return
+        }
+        await removeWorktree(
+            worktreePath: worktreePath,
+            repoPath: repoPath,
+            branchName: branchName,
+            deleteBranch: true
+        )
+    }
 
     /// Creates a git worktree for a task and returns its path and branch name.
     func createWorktree(
@@ -238,7 +315,30 @@ final class WorktreeService: Sendable {
         return slug.isEmpty ? "project" : slug
     }
 
+    static func taskBranchName(for taskID: UUID) -> String {
+        taskID.uuidString.lowercased()
+    }
+
+    static func taskWorktreePath(taskID: UUID, projectName: String, config: WorktreeConfig) -> String {
+        URL(fileURLWithPath: config.resolvedBasePath)
+            .appendingPathComponent(projectSlug(from: projectName))
+            .appendingPathComponent(taskID.uuidString)
+            .path
+    }
+
+    static func pathsReferToSameLocation(_ lhs: String, _ rhs: String) -> Bool {
+        canonicalPath(lhs) == canonicalPath(rhs)
+    }
+
     // MARK: - Private
+
+    private static func canonicalPath(_ path: String) -> String {
+        path.withCString { pointer in
+            guard let resolved = realpath(pointer, nil) else { return path }
+            defer { free(resolved) }
+            return String(cString: resolved)
+        }
+    }
 
     private static func toSlug(_ text: String, maxLength: Int? = nil) -> String {
         let joined = text
@@ -256,6 +356,30 @@ final class WorktreeService: Sendable {
         }
         let branch = line.dropFirst(prefix.count).split(whereSeparator: \Character.isWhitespace).first
         return branch.map(String.init)
+    }
+
+    private func containsWorktree(worktreePath: String, branchName: String, repoPath: String) async -> Bool {
+        let result = await runGit(args: ["worktree", "list", "--porcelain"], in: repoPath)
+        guard result.success else { return false }
+        let expectedPath = Self.canonicalPath(worktreePath)
+        let expectedBranch = "branch refs/heads/\(branchName)"
+        var path: String?
+        for line in result.output.split(separator: "\n", omittingEmptySubsequences: false) {
+            if line.isEmpty {
+                path = nil
+                continue
+            }
+            if line.hasPrefix("worktree ") {
+                path = String(line.dropFirst("worktree ".count))
+                continue
+            }
+            if line == expectedBranch,
+               let path,
+               Self.canonicalPath(path) == expectedPath {
+                return true
+            }
+        }
+        return false
     }
 
     private func defaultBranch(repoPath: String) async throws -> String {
