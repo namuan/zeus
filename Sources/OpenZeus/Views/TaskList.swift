@@ -413,11 +413,11 @@ struct NewTaskSheet: View {
         let branchIsOwned: Bool
         if useExistingBranch {
             guard let opt = branchOptions.first(where: { $0.id == selectedBranchID }) else { return }
-            switch opt.kind {
-            case .local, .remote where opt.presentLocally:
+            switch (opt.kind, opt.presentLocally) {
+            case (.local, _), (.remote, true):
                 branchSource = .existingBranch(opt.localName)
                 branchIsOwned = false
-            case .remote:
+            case (.remote, false):
                 branchSource = .remoteBranch(ref: opt.name, localName: opt.localName, presentLocally: false)
                 branchIsOwned = true
             }
