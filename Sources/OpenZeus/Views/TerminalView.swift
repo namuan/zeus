@@ -99,7 +99,7 @@ private struct TerminalPaneContent: View {
                 )
                 Divider()
             }
-            AppLauncherBar(projectID: projectID, workingDirectory: workingDirectory)
+            AppLauncherBar(entry: entry, projectID: projectID, workingDirectory: workingDirectory)
             Divider()
             if entry.tmuxUnavailable {
                 Label("tmux not found — sessions won't persist", systemImage: "exclamationmark.triangle")
@@ -1056,6 +1056,7 @@ private struct DiffContentView: View {
 // MARK: - App Launcher Bar
 
 private struct AppLauncherBar: View {
+    let entry: TerminalEntry
     let projectID: UUID
     let workingDirectory: String
     @EnvironmentObject var db: AppDatabase
@@ -1067,7 +1068,7 @@ private struct AppLauncherBar: View {
     var body: some View {
         HStack(spacing: 4) {
             ForEach(apps) { app in
-                AppLauncherButton(app: app, workingDirectory: workingDirectory)
+                AppLauncherButton(app: app, entry: entry, workingDirectory: workingDirectory)
                     .contextMenu {
                         if app.isGlobal {
                             Button {
@@ -1128,6 +1129,7 @@ private struct AppLauncherBar: View {
 
 private struct AppLauncherButton: View {
     let app: ProjectApp
+    let entry: TerminalEntry
     let workingDirectory: String
 
     private var icon: NSImage {
@@ -1136,13 +1138,16 @@ private struct AppLauncherButton: View {
 
     var body: some View {
         Button {
-            let appURL = URL(fileURLWithPath: app.appPath)
-            let dirURL = URL(fileURLWithPath: workingDirectory)
-            NSWorkspace.shared.open(
-                [dirURL],
-                withApplicationAt: appURL,
-                configuration: NSWorkspace.OpenConfiguration()
-            ) { _, _ in }
+            Task { @MainActor in
+                let directory = await entry.currentPaneDirectory(fallback: workingDirectory)
+                let appURL = URL(fileURLWithPath: app.appPath)
+                let dirURL = URL(fileURLWithPath: directory)
+                NSWorkspace.shared.open(
+                    [dirURL],
+                    withApplicationAt: appURL,
+                    configuration: NSWorkspace.OpenConfiguration()
+                ) { _, _ in }
+            }
         } label: {
             HStack(spacing: 3) {
                 ZStack(alignment: .bottomTrailing) {
