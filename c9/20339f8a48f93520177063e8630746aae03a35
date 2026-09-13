@@ -1,0 +1,1 @@
+Custom application launchers now open the active tmux pane directory, with the configured working directory as fallback.
