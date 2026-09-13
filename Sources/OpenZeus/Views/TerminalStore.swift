@@ -422,12 +422,19 @@ final class TerminalEntry: ObservableObject {
         }
     }
 
-    private func currentPaneDirectory(using tmux: String) async -> String {
+    func currentPaneDirectory(fallback: String? = nil) async -> String {
+        guard let tmux = tmuxExecutable(searchPaths: config.tmuxSearchPaths) else {
+            return fallback ?? workingDirectory
+        }
+        return await currentPaneDirectory(using: tmux, fallback: fallback)
+    }
+
+    private func currentPaneDirectory(using tmux: String, fallback: String? = nil) async -> String {
         let output = await runProcessOutput(tmux, args: [
             "display-message", "-p", "-t", sessionName, "#{pane_current_path}"
         ])
         let directory = output.trimmingCharacters(in: .whitespacesAndNewlines)
-        return directory.isEmpty ? workingDirectory : directory
+        return directory.isEmpty ? (fallback ?? workingDirectory) : directory
     }
 
     func sendCommand(_ command: String, inNewVerticalPane: Bool = false) {
