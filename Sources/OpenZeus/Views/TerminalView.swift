@@ -774,6 +774,7 @@ private struct TerminalBarCommandEditorPopover: View {
 
 private struct GitControlsView: View {
     @ObservedObject var gitService: GitService
+    @Environment(\.openURL) private var openURL
     @State private var showRevertConfirmation = false
     @State private var showChangesPopover = false
 
@@ -828,6 +829,14 @@ private struct GitControlsView: View {
             .foregroundStyle(.secondary)
             .help("Current branch: \(stats.branch)")
             .transition(.opacity)
+
+            if let repositoryBrowserURL = gitService.repositoryBrowserURL {
+                Button { openURL(repositoryBrowserURL) } label: {
+                    Image(systemName: "safari")
+                }
+                .help("Open repository in browser")
+                .transition(.opacity)
+            }
 
             if stats.ahead > 0 {
                 Button { showChangesPopover.toggle() } label: {

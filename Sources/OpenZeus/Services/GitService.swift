@@ -46,6 +46,7 @@ private struct StatsSnapshot {
     let stats: GitStats
     let changedFiles: [GitFileChange]
     let unpushedFiles: [GitFileChange]
+    let repositoryBrowserURL: URL?
 }
 
 /// Service for running git commands in a working directory.
@@ -54,6 +55,7 @@ final class GitService: ObservableObject {
     @Published var stats: GitStats?
     @Published var changedFiles: [GitFileChange] = []
     @Published var unpushedFiles: [GitFileChange] = []
+    @Published var repositoryBrowserURL: URL?
     @Published var isLoading = false
     @Published var lastError: String?
 
@@ -173,11 +175,15 @@ final class GitService: ObservableObject {
             if self.stats != snapshot.stats { self.stats = snapshot.stats }
             if self.changedFiles != snapshot.changedFiles { self.changedFiles = snapshot.changedFiles }
             if self.unpushedFiles != snapshot.unpushedFiles { self.unpushedFiles = snapshot.unpushedFiles }
+            if self.repositoryBrowserURL != snapshot.repositoryBrowserURL {
+                self.repositoryBrowserURL = snapshot.repositoryBrowserURL
+            }
         } catch {
             lastError = error.localizedDescription
             stats = nil
             changedFiles = []
             unpushedFiles = []
+            repositoryBrowserURL = nil
         }
 
         isLoading = false
@@ -194,7 +200,8 @@ final class GitService: ObservableObject {
         async let statusFetch = runGit(args: ["status", "--porcelain=v1"])
         async let branchFetch = runGit(args: ["rev-parse", "--abbrev-ref", "HEAD"])
         async let remoteFetch = runGit(args: ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])
-        let (statusOutput, branchOutput, remoteOutput) = await (statusFetch, branchFetch, remoteFetch)
+        async let originFetch = runGit(args: ["remote", "get-url", "origin"])
+        let (statusOutput, branchOutput, remoteOutput, originOutput) = await (statusFetch, branchFetch, remoteFetch, originFetch)
 
         guard statusOutput.success else {
             throw GitError.commandFailed(statusOutput.output)
@@ -273,7 +280,10 @@ final class GitService: ObservableObject {
                 behind: behind
             ),
             changedFiles: files,
-            unpushedFiles: unpushedFilesList
+            unpushedFiles: unpushedFilesList,
+            repositoryBrowserURL: originOutput.success
+                ? Self.browserURL(from: originOutput.output.trimmingCharacters(in: .whitespacesAndNewlines))
+                : nil
         )
     }
 
@@ -442,6 +452,36 @@ final class GitService: ObservableObject {
             if result.success { return candidate }
         }
         return nil
+    }
+
+    static func browserURL(from remote: String) -> URL? {
+        var components: URLComponents
+        if let source = URLComponents(string: remote), let scheme = source.scheme {
+            guard ["https", "http", "ssh", "git"].contains(scheme.lowercased()),
+                  source.host != nil else { return nil }
+            components = source
+            if scheme.lowercased() == "ssh" || scheme.lowercased() == "git" {
+                components.scheme = "https"
+                components.user = nil
+                components.password = nil
+                components.port = nil
+            }
+        } else {
+            guard let colon = remote.firstIndex(of: ":") else { return nil }
+            let hostPart = String(remote[..<colon])
+            let path = String(remote[remote.index(after: colon)...])
+            let host = hostPart.split(separator: "@").last.map(String.init) ?? hostPart
+            guard !host.isEmpty, !path.isEmpty else { return nil }
+            components = URLComponents()
+            components.scheme = "https"
+            components.host = host
+            components.path = "/\(path)"
+        }
+
+        if components.path.hasSuffix(".git") {
+            components.path.removeLast(4)
+        }
+        return components.url
     }
 
     private func runGit(args: [String]) async -> GitCommandResult {
