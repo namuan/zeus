@@ -46,6 +46,7 @@ private struct StatsSnapshot {
     let stats: GitStats
     let changedFiles: [GitFileChange]
     let unpushedFiles: [GitFileChange]
+    let repositoryBrowserURL: URL?
 }
 
 /// Service for running git commands in a working directory.
@@ -54,11 +55,16 @@ final class GitService: ObservableObject {
     @Published var stats: GitStats?
     @Published var changedFiles: [GitFileChange] = []
     @Published var unpushedFiles: [GitFileChange] = []
+    @Published var repositoryBrowserURL: URL?
+    @Published var pullRequestURL: URL?
+    @Published var pullRequestError: String?
+    @Published var isCheckingPullRequest = false
     @Published var isLoading = false
     @Published var lastError: String?
 
     private let workingDirectory: String
     private let gitExecutablePath: String
+    private var pullRequestRequestID = UUID()
     private var cachedDefaultBranch: String?
     /// Lazily-resolved repo toplevel — the directory `git status --porcelain` uses
     /// as its path root. Required so that `git diff -- <path>` resolves paths correctly
@@ -173,11 +179,15 @@ final class GitService: ObservableObject {
             if self.stats != snapshot.stats { self.stats = snapshot.stats }
             if self.changedFiles != snapshot.changedFiles { self.changedFiles = snapshot.changedFiles }
             if self.unpushedFiles != snapshot.unpushedFiles { self.unpushedFiles = snapshot.unpushedFiles }
+            if self.repositoryBrowserURL != snapshot.repositoryBrowserURL {
+                self.repositoryBrowserURL = snapshot.repositoryBrowserURL
+            }
         } catch {
             lastError = error.localizedDescription
             stats = nil
             changedFiles = []
             unpushedFiles = []
+            repositoryBrowserURL = nil
         }
 
         isLoading = false
@@ -194,7 +204,8 @@ final class GitService: ObservableObject {
         async let statusFetch = runGit(args: ["status", "--porcelain=v1"])
         async let branchFetch = runGit(args: ["rev-parse", "--abbrev-ref", "HEAD"])
         async let remoteFetch = runGit(args: ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])
-        let (statusOutput, branchOutput, remoteOutput) = await (statusFetch, branchFetch, remoteFetch)
+        async let originFetch = runGit(args: ["remote", "get-url", "origin"])
+        let (statusOutput, branchOutput, remoteOutput, originOutput) = await (statusFetch, branchFetch, remoteFetch, originFetch)
 
         guard statusOutput.success else {
             throw GitError.commandFailed(statusOutput.output)
@@ -273,8 +284,60 @@ final class GitService: ObservableObject {
                 behind: behind
             ),
             changedFiles: files,
-            unpushedFiles: unpushedFilesList
+            unpushedFiles: unpushedFilesList,
+            repositoryBrowserURL: originOutput.success
+                ? Self.browserURL(from: originOutput.output.trimmingCharacters(in: .whitespacesAndNewlines))
+                : nil
         )
+    }
+
+    func fetchPullRequest(executablePath: String) async {
+        guard let branch = stats?.branch, branch != "unknown" else {
+            pullRequestRequestID = UUID()
+            isCheckingPullRequest = false
+            pullRequestURL = nil
+            pullRequestError = nil
+            return
+        }
+
+        pullRequestRequestID = UUID()
+        let requestID = pullRequestRequestID
+        isCheckingPullRequest = true
+        pullRequestURL = nil
+        pullRequestError = nil
+
+        guard let ghPath = GitHubCLIResolver.resolve(configuredPath: executablePath) else {
+            pullRequestError = "GitHub CLI (gh) was not found. Install it or choose its location in Settings > Git."
+            isCheckingPullRequest = false
+            return
+        }
+
+        let result = await runGitCommand(
+            args: ["pr", "list", "--head", branch, "--state", "all", "--json", "url", "--limit", "1"],
+            in: workingDirectory,
+            executablePath: ghPath
+        )
+        guard requestID == pullRequestRequestID else { return }
+        isCheckingPullRequest = false
+
+        guard result.success else {
+            let details = result.error.trimmingCharacters(in: .whitespacesAndNewlines)
+            pullRequestError = details.isEmpty
+                ? "Could not check for a pull request. Verify GitHub CLI authentication with `gh auth status`."
+                : "Could not check for a pull request: \(details)"
+            return
+        }
+
+        pullRequestURL = Self.pullRequestURL(from: result.output)
+    }
+
+    nonisolated static func pullRequestURL(from output: String) -> URL? {
+        guard let data = output.data(using: .utf8),
+              let entries = try? JSONSerialization.jsonObject(with: data) as? [[String: String]],
+              let urlString = entries.first?["url"],
+              let url = URL(string: urlString),
+              ["https", "http"].contains(url.scheme?.lowercased() ?? "") else { return nil }
+        return url
     }
 
     // MARK: - Git Actions
@@ -444,6 +507,36 @@ final class GitService: ObservableObject {
         return nil
     }
 
+    static func browserURL(from remote: String) -> URL? {
+        var components: URLComponents
+        if let source = URLComponents(string: remote), let scheme = source.scheme {
+            guard ["https", "http", "ssh", "git"].contains(scheme.lowercased()),
+                  source.host != nil else { return nil }
+            components = source
+            if scheme.lowercased() == "ssh" || scheme.lowercased() == "git" {
+                components.scheme = "https"
+                components.user = nil
+                components.password = nil
+                components.port = nil
+            }
+        } else {
+            guard let colon = remote.firstIndex(of: ":") else { return nil }
+            let hostPart = String(remote[..<colon])
+            let path = String(remote[remote.index(after: colon)...])
+            let host = hostPart.split(separator: "@").last.map(String.init) ?? hostPart
+            guard !host.isEmpty, !path.isEmpty else { return nil }
+            components = URLComponents()
+            components.scheme = "https"
+            components.host = host
+            components.path = "/\(path)"
+        }
+
+        if components.path.hasSuffix(".git") {
+            components.path.removeLast(4)
+        }
+        return components.url
+    }
+
     private func runGit(args: [String]) async -> GitCommandResult {
         await runGitCommand(args: args, in: workingDirectory, executablePath: gitExecutablePath)
     }
@@ -452,6 +545,39 @@ final class GitService: ObservableObject {
     /// when `workingDirectory` is a subdirectory of the actual repo root.
     private func runGitFromTopLevel(args: [String]) async -> GitCommandResult {
         await runGitCommand(args: args, in: await repoTopLevel(), executablePath: gitExecutablePath)
+    }
+}
+
+enum GitHubCLIResolver {
+    static func resolve(configuredPath: String, searchPaths: [String]? = nil) -> String? {
+        let expandedPath = (configuredPath as NSString).expandingTildeInPath
+        if !expandedPath.isEmpty, isExecutableFile(at: expandedPath) {
+            return expandedPath
+        }
+
+        let environmentPaths = ProcessInfo.processInfo.environment["PATH"]?
+            .split(separator: ":")
+            .map { String($0) } ?? []
+        let directories = searchPaths ?? environmentPaths + [
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "/opt/local/bin",
+            "/usr/bin"
+        ]
+        for directory in directories {
+            let candidate = URL(fileURLWithPath: directory).appendingPathComponent("gh").path
+            if isExecutableFile(at: candidate) {
+                return candidate
+            }
+        }
+        return nil
+    }
+
+    private static func isExecutableFile(at path: String) -> Bool {
+        var isDirectory = ObjCBool(false)
+        return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
+            && !isDirectory.boolValue
+            && FileManager.default.isExecutableFile(atPath: path)
     }
 }
 

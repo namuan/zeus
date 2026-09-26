@@ -293,6 +293,24 @@ private struct GitTab: View {
                 }
             }
 
+            Section("GitHub CLI") {
+                TextField("Executable path (blank for automatic detection)", text: $config.ghExecutablePath)
+                HStack {
+                    Button("Browse…") { browseForGitHubCLI() }
+                    Button("Use Automatic Detection") { config.ghExecutablePath = "" }
+                }
+                if let path = GitHubCLIResolver.resolve(configuredPath: config.ghExecutablePath) {
+                    Text("Using \(path)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                } else {
+                    Text("GitHub CLI not found. Install gh or choose its location.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section("Auto-refresh") {
                 LabeledContent("Debounce delay") {
                     HStack(spacing: 4) {
@@ -334,6 +352,19 @@ private struct GitTab: View {
         panel.prompt = "Select"
         if panel.runModal() == .OK, let url = panel.url {
             config.executablePath = url.path
+        }
+    }
+
+    private func browseForGitHubCLI() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.directoryURL = URL(fileURLWithPath: "/opt/homebrew/bin")
+        panel.message = "Choose the GitHub CLI executable"
+        panel.prompt = "Select"
+        if panel.runModal() == .OK, let url = panel.url {
+            config.ghExecutablePath = url.path
         }
     }
 }

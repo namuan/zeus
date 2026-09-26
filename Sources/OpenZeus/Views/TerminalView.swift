@@ -774,8 +774,11 @@ private struct TerminalBarCommandEditorPopover: View {
 
 private struct GitControlsView: View {
     @ObservedObject var gitService: GitService
+    @Environment(\.openURL) private var openURL
+    @Environment(\.appConfig) private var appConfig
     @State private var showRevertConfirmation = false
     @State private var showChangesPopover = false
+    @State private var showPullRequestError = false
 
     var body: some View {
         HStack(spacing: 3) {
@@ -789,6 +792,10 @@ private struct GitControlsView: View {
         }
         .onDisappear {
             gitService.stopWatching()
+        }
+        .task(id: "\(gitService.stats?.branch ?? "")|\(appConfig.git.ghExecutablePath)") {
+            guard gitService.stats != nil else { return }
+            await gitService.fetchPullRequest(executablePath: appConfig.git.ghExecutablePath)
         }
         .popover(isPresented: $showChangesPopover, arrowEdge: .bottom) {
             GitChangesPopover(
@@ -807,11 +814,21 @@ private struct GitControlsView: View {
                 }
             )
         }
+        .alert("Could Not Check Pull Request", isPresented: $showPullRequestError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(gitService.pullRequestError ?? "GitHub CLI could not check this branch.")
+        }
     }
 
     @ViewBuilder
     private var gitButtons: some View {
-        Button { Task { await gitService.fetchStatus() } } label: {
+        Button {
+            Task {
+                await gitService.fetchStatus()
+                await gitService.fetchPullRequest(executablePath: appConfig.git.ghExecutablePath)
+            }
+        } label: {
             Image(systemName: "arrow.clockwise")
         }
         .help("Refresh Git Status")
@@ -828,6 +845,30 @@ private struct GitControlsView: View {
             .foregroundStyle(.secondary)
             .help("Current branch: \(stats.branch)")
             .transition(.opacity)
+
+            if let repositoryBrowserURL = gitService.repositoryBrowserURL {
+                Button { openURL(repositoryBrowserURL) } label: {
+                    Image(systemName: "safari")
+                }
+                .help("Open repository in browser")
+                .transition(.opacity)
+            }
+
+            if let pullRequestURL = gitService.pullRequestURL {
+                Button { openURL(pullRequestURL) } label: {
+                    Image(systemName: "arrow.up.right.square")
+                }
+                .help("Open pull request for \(stats.branch)")
+                .transition(.opacity)
+            }
+
+            if let pullRequestError = gitService.pullRequestError {
+                Button { showPullRequestError = true } label: {
+                    Image(systemName: "exclamationmark.triangle")
+                }
+                .help(pullRequestError)
+                .transition(.opacity)
+            }
 
             if stats.ahead > 0 {
                 Button { showChangesPopover.toggle() } label: {
