@@ -56,11 +56,15 @@ final class GitService: ObservableObject {
     @Published var changedFiles: [GitFileChange] = []
     @Published var unpushedFiles: [GitFileChange] = []
     @Published var repositoryBrowserURL: URL?
+    @Published var pullRequestURL: URL?
+    @Published var pullRequestError: String?
+    @Published var isCheckingPullRequest = false
     @Published var isLoading = false
     @Published var lastError: String?
 
     private let workingDirectory: String
     private let gitExecutablePath: String
+    private var pullRequestRequestID = UUID()
     private var cachedDefaultBranch: String?
     /// Lazily-resolved repo toplevel — the directory `git status --porcelain` uses
     /// as its path root. Required so that `git diff -- <path>` resolves paths correctly
@@ -287,6 +291,55 @@ final class GitService: ObservableObject {
         )
     }
 
+    func fetchPullRequest(executablePath: String) async {
+        guard let branch = stats?.branch, branch != "unknown" else {
+            pullRequestRequestID = UUID()
+            isCheckingPullRequest = false
+            pullRequestURL = nil
+            pullRequestError = nil
+            return
+        }
+
+        pullRequestRequestID = UUID()
+        let requestID = pullRequestRequestID
+        isCheckingPullRequest = true
+        pullRequestURL = nil
+        pullRequestError = nil
+
+        guard let ghPath = GitHubCLIResolver.resolve(configuredPath: executablePath) else {
+            pullRequestError = "GitHub CLI (gh) was not found. Install it or choose its location in Settings > Git."
+            isCheckingPullRequest = false
+            return
+        }
+
+        let result = await runGitCommand(
+            args: ["pr", "list", "--head", branch, "--state", "all", "--json", "url", "--limit", "1"],
+            in: workingDirectory,
+            executablePath: ghPath
+        )
+        guard requestID == pullRequestRequestID else { return }
+        isCheckingPullRequest = false
+
+        guard result.success else {
+            let details = result.error.trimmingCharacters(in: .whitespacesAndNewlines)
+            pullRequestError = details.isEmpty
+                ? "Could not check for a pull request. Verify GitHub CLI authentication with `gh auth status`."
+                : "Could not check for a pull request: \(details)"
+            return
+        }
+
+        pullRequestURL = Self.pullRequestURL(from: result.output)
+    }
+
+    nonisolated static func pullRequestURL(from output: String) -> URL? {
+        guard let data = output.data(using: .utf8),
+              let entries = try? JSONSerialization.jsonObject(with: data) as? [[String: String]],
+              let urlString = entries.first?["url"],
+              let url = URL(string: urlString),
+              ["https", "http"].contains(url.scheme?.lowercased() ?? "") else { return nil }
+        return url
+    }
+
     // MARK: - Git Actions
 
     /// Unstage a single file (git reset HEAD -- <path>)
@@ -492,6 +545,39 @@ final class GitService: ObservableObject {
     /// when `workingDirectory` is a subdirectory of the actual repo root.
     private func runGitFromTopLevel(args: [String]) async -> GitCommandResult {
         await runGitCommand(args: args, in: await repoTopLevel(), executablePath: gitExecutablePath)
+    }
+}
+
+enum GitHubCLIResolver {
+    static func resolve(configuredPath: String, searchPaths: [String]? = nil) -> String? {
+        let expandedPath = (configuredPath as NSString).expandingTildeInPath
+        if !expandedPath.isEmpty, isExecutableFile(at: expandedPath) {
+            return expandedPath
+        }
+
+        let environmentPaths = ProcessInfo.processInfo.environment["PATH"]?
+            .split(separator: ":")
+            .map { String($0) } ?? []
+        let directories = searchPaths ?? environmentPaths + [
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "/opt/local/bin",
+            "/usr/bin"
+        ]
+        for directory in directories {
+            let candidate = URL(fileURLWithPath: directory).appendingPathComponent("gh").path
+            if isExecutableFile(at: candidate) {
+                return candidate
+            }
+        }
+        return nil
+    }
+
+    private static func isExecutableFile(at path: String) -> Bool {
+        var isDirectory = ObjCBool(false)
+        return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
+            && !isDirectory.boolValue
+            && FileManager.default.isExecutableFile(atPath: path)
     }
 }
 

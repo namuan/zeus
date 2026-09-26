@@ -335,15 +335,18 @@ struct StorageConfig: Codable, Equatable, Sendable {
 
 struct GitConfig: Codable, Equatable, Sendable {
     var executablePath: String
+    var ghExecutablePath: String
     var statusDebounceMs: Int
     var statusPollIntervalSeconds: Int
 
     init(
         executablePath: String = "/usr/bin/git",
+        ghExecutablePath: String = "",
         statusDebounceMs: Int = 300,
         statusPollIntervalSeconds: Int = 30
     ) {
         self.executablePath = executablePath
+        self.ghExecutablePath = ghExecutablePath
         self.statusDebounceMs = statusDebounceMs
         self.statusPollIntervalSeconds = statusPollIntervalSeconds
     }
@@ -352,6 +355,7 @@ struct GitConfig: Codable, Equatable, Sendable {
         let d = GitConfig()
         let c = try decoder.container(keyedBy: CodingKeys.self)
         executablePath          = (try? c.decode(String.self, forKey: .executablePath))          ?? d.executablePath
+        ghExecutablePath         = (try? c.decode(String.self, forKey: .ghExecutablePath))         ?? d.ghExecutablePath
         statusDebounceMs        = (try? c.decode(Int.self, forKey: .statusDebounceMs))        ?? d.statusDebounceMs
         statusPollIntervalSeconds = (try? c.decode(Int.self, forKey: .statusPollIntervalSeconds)) ?? d.statusPollIntervalSeconds
     }

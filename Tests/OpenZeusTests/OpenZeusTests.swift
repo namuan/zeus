@@ -12,7 +12,7 @@ import Testing
         "logging": { "maxFileSizeBytes": 1048576 },
         "notifications": { "soundName": "Glass" },
         "storage": { "databaseFileName": "custom.db" },
-        "git": { "executablePath": "/usr/local/bin/git" },
+        "git": { "executablePath": "/usr/local/bin/git", "ghExecutablePath": "/custom/bin/gh" },
         "ui": { "projectListMinWidth": 250 }
     }
     """
@@ -24,6 +24,7 @@ import Testing
     #expect(config.notifications.soundName == "Glass")
     #expect(config.storage.databaseFileName == "custom.db")
     #expect(config.git.executablePath == "/usr/local/bin/git")
+    #expect(config.git.ghExecutablePath == "/custom/bin/gh")
     #expect(config.ui.projectListMinWidth == 250)
 }
 
@@ -42,6 +43,7 @@ import Testing
     #expect(config.notifications.soundName == "Tink")
     #expect(config.storage.appSupportFolderName == "OpenZeus")
     #expect(config.git.executablePath == "/usr/bin/git")
+    #expect(config.git.ghExecutablePath == "")
     #expect(config.ui.projectListMinWidth == 200)
 }
 
@@ -64,7 +66,34 @@ import Testing
     #expect(config.notifications.notificationTitle == "Agent finished")
     #expect(config.storage.databaseFileName == "app.db")
     #expect(config.git.executablePath == "/usr/bin/git")
+    #expect(config.git.ghExecutablePath == "")
     #expect(config.ui.quickCommandsWidth == 440)
+}
+
+@Test func githubPullRequestURLParsesGhJSON() {
+    #expect(GitService.pullRequestURL(from: "[]") == nil)
+    #expect(GitService.pullRequestURL(from: "not json") == nil)
+    #expect(
+        GitService.pullRequestURL(from: "[{\"url\":\"https://github.com/example/repo/pull/12\"}]")
+            == URL(string: "https://github.com/example/repo/pull/12")
+    )
+}
+
+@Test func githubCLIResolverPrefersConfiguredExecutable() {
+    #expect(GitHubCLIResolver.resolve(configuredPath: "/usr/bin/true", searchPaths: []) == "/usr/bin/true")
+    #expect(GitHubCLIResolver.resolve(configuredPath: "/missing/gh", searchPaths: []) == nil)
+}
+
+@Test func githubCLIResolverFindsExecutableInSearchPaths() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let executable = directory.appendingPathComponent("gh")
+    try Data().write(to: executable)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
+
+    #expect(GitHubCLIResolver.resolve(configuredPath: "", searchPaths: [directory.path]) == executable.path)
 }
 
 @Test func appConfigFallsBackForUnknownTerminalTheme() throws {
