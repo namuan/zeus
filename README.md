@@ -2,7 +2,9 @@
 
 Native macOS AI agent orchestrator. Visual control plane for managing fleets of AI agents.
 
-![Open-Zeus screenshot](assets/intro.png)
+[![Watch the Open-Zeus intro video](assets/intro.png)](assets/openzeus-intro.mp4)
+
+▶️ Click the preview to watch the intro video.
 
 📸 See the **[Product Tour](product-tour/PRODUCT_TOUR.md)** for a visual walkthrough of every feature — with annotated screenshots.
 
