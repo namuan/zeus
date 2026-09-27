@@ -6,6 +6,8 @@ Native macOS AI agent orchestrator. Visual control plane for managing fleets of 
 
 ▶️ Click the preview to watch the intro video.
 
+https://github.com/user-attachments/assets/b693f65c-2a82-4836-8168-aefe28c2242c
+
 📸 See the **[Product Tour](product-tour/PRODUCT_TOUR.md)** for a visual walkthrough of every feature — with annotated screenshots.
 
 ## Features
