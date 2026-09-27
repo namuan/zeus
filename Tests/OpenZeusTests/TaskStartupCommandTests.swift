@@ -285,6 +285,7 @@ private func waitForStartupOutput(_ url: URL, expected: String) async throws {
     reopenedArguments.insert("-d", at: 1)
     _ = try runStartupTestProcess(tmux, arguments: prefix + reopenedArguments)
     #expect(try runStartupTestProcess(tmux, arguments: prefix + ["new-window", "-d", "-t", "task", shell]) == 0)
+    #expect(try runStartupTestProcess(tmux, arguments: prefix + ["resize-window", "-x", "120", "-y", "40", "-t", "task"]) == 0)
     #expect(try runStartupTestProcess(tmux, arguments: prefix + ["split-window", "-d", "-t", "task", shell]) == 0)
     try await Task.sleep(for: .milliseconds(100))
     #expect(try String(contentsOf: output, encoding: .utf8) == expected)
