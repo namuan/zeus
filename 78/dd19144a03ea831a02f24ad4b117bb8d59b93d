@@ -1,0 +1,1 @@
+Make tmux startup test resize its headless window before exercising split-window; full swift test passed once, focused tests pass; latest pre-commit run had intermittent worktree fixture failures.
