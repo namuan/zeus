@@ -1,0 +1,1 @@
+Pin SwiftTerm before Metal shader toolchain requirement; release build succeeds without MetalToolchain.
