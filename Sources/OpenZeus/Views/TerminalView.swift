@@ -1407,7 +1407,11 @@ private struct AppLauncherButton: View {
 
 final class TerminalContainerView: NSView {
     var sessionName: String?
+    var tmuxExecutablePath: String?
     nonisolated(unsafe) private var didSelectionDrag = false
+    private var preciseScrollRemainder: CGFloat = 0
+    private var pendingScrollSteps = 0
+    private var scrollFlushTask: Task<Void, Never>?
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         bounds.contains(point) ? self : nil
@@ -1435,13 +1439,57 @@ final class TerminalContainerView: NSView {
     override func mouseMoved(with event: NSEvent) { subviews.first?.mouseMoved(with: event) }
 
     override func scrollWheel(with event: NSEvent) {
-        // Forward every scroll event immediately to SwiftTerm. SwiftTerm
-        // translates precise trackpad deltas (including momentum) and discrete
-        // mouse-wheel ticks into terminal lines. When tmux mouse mode is
-        // enabled, the resulting terminal mouse events are handled by tmux,
-        // which enters copy mode and scrolls the pane under the pointer.
-        // Without tmux, SwiftTerm scrolls its own history buffer directly.
-        subviews.first?.scrollWheel(with: event) ?? super.scrollWheel(with: event)
+        guard sessionName != nil, tmuxExecutablePath != nil else {
+            subviews.first?.scrollWheel(with: event) ?? super.scrollWheel(with: event)
+            return
+        }
+
+        let delta = event.scrollingDeltaY
+        guard delta != 0 else { return }
+
+        if event.hasPreciseScrollingDeltas {
+            preciseScrollRemainder += delta
+            let steps = Int(abs(preciseScrollRemainder) / 8)
+            guard steps > 0 else { return }
+            let signedSteps = preciseScrollRemainder > 0 ? steps : -steps
+            preciseScrollRemainder -= CGFloat(signedSteps * 8)
+            pendingScrollSteps += signedSteps
+        } else {
+            let steps = max(1, Int(abs(delta).rounded()))
+            pendingScrollSteps += delta > 0 ? steps : -steps
+        }
+
+        scheduleScrollFlush()
+    }
+
+    private func scheduleScrollFlush() {
+        guard scrollFlushTask == nil else { return }
+        scrollFlushTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(16))
+            guard let self else { return }
+            await self.flushPendingScroll()
+        }
+    }
+
+    private func flushPendingScroll() async {
+        let steps = pendingScrollSteps
+        pendingScrollSteps = 0
+
+        if steps > 0, let sessionName, let tmuxExecutablePath {
+            await runProcessOutput(tmuxExecutablePath, args: ["copy-mode", "-t", sessionName])
+            await runProcessOutput(tmuxExecutablePath, args: [
+                "send-keys", "-X", "-N", "\(steps)", "-t", sessionName, "scroll-up",
+            ])
+        } else if steps < 0, let sessionName, let tmuxExecutablePath {
+            await runProcessOutput(tmuxExecutablePath, args: [
+                "send-keys", "-X", "-N", "\(-steps)", "-t", sessionName, "scroll-down",
+            ])
+        }
+
+        scrollFlushTask = nil
+        if pendingScrollSteps != 0 {
+            scheduleScrollFlush()
+        }
     }
 }
 
@@ -1460,6 +1508,7 @@ private struct TerminalRepresentable: NSViewRepresentable {
     }
 
     func updateNSView(_ container: TerminalContainerView, context: Context) {
+        container.tmuxExecutablePath = tmuxExecutable(searchPaths: terminalConfig.tmuxSearchPaths)
         let terminalView = entry.terminalView
         logDebug("TerminalRepresentable.updateNSView: session=\(sessionID), process running=\(terminalView.process?.running ?? false)")
 
