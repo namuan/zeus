@@ -867,6 +867,14 @@ private func killTmuxSessionSync(_ tmux: String, sessionName: String) {
         "show-options", "-v", "-t", sessionName, "mouse"
     ])).trimmingCharacters(in: .whitespacesAndNewlines)
     #expect(mouseOption == "on")
+
+    _ = await runProcessOutput(tmux, args: [
+        "set-option", "-w", "-t", sessionName, "focus-follows-mouse", "on"
+    ])
+    let focusFollowsMouseOption = (await runProcessOutput(tmux, args: [
+        "show-options", "-w", "-v", "-t", sessionName, "focus-follows-mouse"
+    ])).trimmingCharacters(in: .whitespacesAndNewlines)
+    #expect(focusFollowsMouseOption == "on")
 }
 
 // MARK: - Edge Cases

@@ -1,0 +1,5 @@
+SwiftTerm v1.20.0
+https://github.com/migueldeicaza/SwiftTerm
+Commit: 5d14406844143538cd8f8858d1d2a67c1fe443e5
+
+The local Package.swift excludes Apple/Metal/Shaders.metal so builds do not require Apple's Metal Toolchain. SwiftTerm's Metal renderer is unavailable; its non-Metal renderer remains enabled.
