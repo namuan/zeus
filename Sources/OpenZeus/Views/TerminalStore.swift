@@ -241,6 +241,8 @@ final class TerminalEntry: ObservableObject {
 
             let output = await runProcessOutput(tmux, args: args)
             logInfo("openWindow: tmux new-window completed, output='\(output)'")
+            await runProcessOutput(tmux, args: ["set-option", "-w", "-t", sessionName, "mouse", "on"])
+            await runProcessOutput(tmux, args: ["set-option", "-w", "-t", sessionName, "focus-follows-mouse", "on"])
 
             logDebug("openWindow: waiting \(config.tmuxSettleDelayMs)ms for tmux to settle...")
             try? await Task.sleep(for: .milliseconds(config.tmuxSettleDelayMs))

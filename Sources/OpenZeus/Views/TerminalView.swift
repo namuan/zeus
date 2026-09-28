@@ -1538,6 +1538,7 @@ private struct TerminalRepresentable: NSViewRepresentable {
                     try? await Task.sleep(for: .milliseconds(terminalConfig.mouseModeDelayMs))
                     logDebug("TerminalRepresentable.updateNSView: ensuring tmux mouse mode is enabled")
                     await runProcessOutput(tmux, args: ["set-option", "-t", sessionName, "mouse", "on"])
+                    await runProcessOutput(tmux, args: ["set-option", "-w", "-t", sessionName, "focus-follows-mouse", "on"])
                 }
             }
             logDebug("TerminalRepresentable.updateNSView: process already running, skipping")
@@ -1573,6 +1574,7 @@ private struct TerminalRepresentable: NSViewRepresentable {
                 try? await Task.sleep(for: .milliseconds(terminalConfig.mouseModeDelayMs))
                 logDebug("TerminalRepresentable.updateNSView: enabling tmux mouse mode")
                 await runProcessOutput(tmux, args: ["set-option", "-t", sessionName, "mouse", "on"])
+                await runProcessOutput(tmux, args: ["set-option", "-w", "-t", sessionName, "focus-follows-mouse", "on"])
             }
         } else {
             logWarning("TerminalRepresentable.updateNSView: tmux not found, using direct shell")

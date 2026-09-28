@@ -9,7 +9,7 @@ let package = Package(
         .executable(name: "OpenZeus", targets: ["OpenZeus"])
     ],
     dependencies: [
-        .package(url: "https://github.com/migueldeicaza/SwiftTerm", revision: "bce00a3abbf05cdc4d0698521999c607dd0c71a2"),
+        .package(path: "Vendor/SwiftTerm"),
         .package(url: "https://github.com/groue/GRDB.swift", from: "6.0.0"),
     ],
     targets: [
