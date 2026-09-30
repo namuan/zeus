@@ -1,0 +1,1 @@
+Adds GitHub CLI auth verification in Git settings and an opt-in openzeus-gh zsh login-shell wrapper with retry.
