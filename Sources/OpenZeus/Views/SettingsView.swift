@@ -282,6 +282,11 @@ private struct NotificationsTab: View {
 
 private struct GitTab: View {
     @Binding var config: GitConfig
+    @State private var isVerifyingGitHubCLI = false
+    @State private var showVerificationResult = false
+    @State private var showWrapperOffer = false
+    @State private var verificationMessage = ""
+    @State private var verificationError = ""
 
     var body: some View {
         Form {
@@ -298,6 +303,11 @@ private struct GitTab: View {
                 HStack {
                     Button("Browse…") { browseForGitHubCLI() }
                     Button("Use Automatic Detection") { config.ghExecutablePath = "" }
+                    Spacer()
+                    Button(isVerifyingGitHubCLI ? "Verifying…" : "Verify") {
+                        Task { await verifyGitHubCLI() }
+                    }
+                    .disabled(isVerifyingGitHubCLI)
                 }
                 if let path = GitHubCLIResolver.resolve(configuredPath: config.ghExecutablePath) {
                     Text("Using \(path)")
@@ -340,6 +350,66 @@ private struct GitTab: View {
             }
         }
         .formStyle(.grouped)
+        .alert("GitHub CLI Verification", isPresented: $showVerificationResult) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(verificationMessage)
+        }
+        .confirmationDialog(
+            "GitHub CLI verification failed",
+            isPresented: $showWrapperOffer,
+            titleVisibility: .visible
+        ) {
+            Button("Create and use wrapper…") { createWrapper() }
+            Button("Continue without wrapper", role: .cancel) {}
+        } message: {
+            Text(verificationError)
+        }
+    }
+
+    @MainActor
+    private func verifyGitHubCLI() async {
+        isVerifyingGitHubCLI = true
+        defer { isVerifyingGitHubCLI = false }
+        do {
+            let output = try await GitHubCLIResolver.verify(configuredPath: config.ghExecutablePath)
+            verificationMessage = output.isEmpty ? "GitHub CLI is authenticated and reachable." : output
+            showVerificationResult = true
+        } catch {
+            verificationError = error.localizedDescription
+            showWrapperOffer = true
+        }
+    }
+
+    @MainActor
+    private func createWrapper() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose a directory for the GitHub CLI wrapper"
+        panel.prompt = "Select"
+        guard panel.runModal() == .OK, let directory = panel.url else { return }
+
+        let wrapper = directory.appendingPathComponent("openzeus-gh")
+        if FileManager.default.fileExists(atPath: wrapper.path) {
+            let alert = NSAlert()
+            alert.messageText = "Replace existing wrapper?"
+            alert.informativeText = "\(wrapper.path) already exists. Replace it?"
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Replace")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+
+        do {
+            let createdWrapper = try GitHubCLIResolver.createLoginShellWrapper(in: directory)
+            config.ghExecutablePath = createdWrapper.path
+            Task { await verifyGitHubCLI() }
+        } catch {
+            verificationMessage = error.localizedDescription
+            showVerificationResult = true
+        }
     }
 
     private func browseForExecutable() {

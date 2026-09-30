@@ -96,6 +96,53 @@ import Testing
     #expect(GitHubCLIResolver.resolve(configuredPath: "", searchPaths: [directory.path]) == executable.path)
 }
 
+@Test func githubCLIVerificationRunsAuthStatus() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let executable = directory.appendingPathComponent("gh")
+    try Data("#!/bin/sh\nprintf 'Logged in\\n'\n".utf8).write(to: executable)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
+
+    let output = try await GitHubCLIResolver.verify(configuredPath: executable.path)
+
+    #expect(output.contains("Logged in"))
+}
+
+@Test func githubCLIVerificationReportsFailure() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let executable = directory.appendingPathComponent("gh")
+    try Data("#!/bin/sh\nprintf 'authentication required' >&2\nexit 1\n".utf8).write(to: executable)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
+
+    do {
+        _ = try await GitHubCLIResolver.verify(configuredPath: executable.path)
+        Issue.record("Expected GitHub CLI verification to fail")
+    } catch {
+        #expect(error.localizedDescription.contains("authentication required"))
+    }
+}
+
+@Test func githubCLIWrapperUsesLoginShellAndIsExecutable() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let wrapper = try GitHubCLIResolver.createLoginShellWrapper(in: directory)
+    let contents = try String(contentsOf: wrapper, encoding: .utf8)
+    let attributes = try FileManager.default.attributesOfItem(atPath: wrapper.path)
+    let permissions = (attributes[.posixPermissions] as? NSNumber)?.intValue
+
+    #expect(wrapper.lastPathComponent == "openzeus-gh")
+    #expect(contents.contains("/bin/zsh -lc"))
+    #expect(contents.contains("exec gh \"$@\""))
+    #expect(permissions.map { $0 & 0o111 != 0 } == true)
+}
+
 @Test func appConfigFallsBackForUnknownTerminalTheme() throws {
     let json = """
     { "terminal": { "theme": "sepia" } }

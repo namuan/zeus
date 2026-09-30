@@ -549,6 +549,39 @@ final class GitService: ObservableObject {
 }
 
 enum GitHubCLIResolver {
+    static func verify(configuredPath: String) async throws -> String {
+        guard let executable = resolve(configuredPath: configuredPath) else {
+            throw GitHubCLIError("GitHub CLI (gh) was not found. Install it or choose its location in Settings > Git.")
+        }
+
+        let result = await runGitCommand(
+            args: ["auth", "status"],
+            in: FileManager.default.homeDirectoryForCurrentUser.path,
+            executablePath: executable
+        )
+        guard result.success else {
+            let details = result.error.isEmpty ? result.output : result.error
+            throw GitHubCLIError(
+                details.isEmpty
+                    ? "GitHub CLI verification failed. Check that gh is installed and authenticated."
+                    : details
+            )
+        }
+        return result.output
+    }
+
+    static func createLoginShellWrapper(in directory: URL) throws -> URL {
+        var isDirectory = ObjCBool(false)
+        guard FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            throw GitHubCLIError("Select an existing directory for the wrapper script.")
+        }
+
+        let wrapper = directory.appendingPathComponent("openzeus-gh")
+        try Data("#!/bin/sh\nexec /bin/zsh -lc 'exec gh \"$@\"' openzeus-gh \"$@\"\n".utf8).write(to: wrapper)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapper.path)
+        return wrapper
+    }
+
     static func resolve(configuredPath: String, searchPaths: [String]? = nil) -> String? {
         let expandedPath = (configuredPath as NSString).expandingTildeInPath
         if !expandedPath.isEmpty, isExecutableFile(at: expandedPath) {
@@ -650,6 +683,16 @@ struct GitCommandResult: Sendable {
     let output: String
     let error: String
     let exitCode: Int
+}
+
+struct GitHubCLIError: LocalizedError {
+    let message: String
+
+    init(_ message: String) {
+        self.message = message
+    }
+
+    var errorDescription: String? { message }
 }
 
 enum GitError: LocalizedError {
