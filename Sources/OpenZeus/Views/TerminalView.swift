@@ -233,23 +233,20 @@ private struct WindowControlBar: View {
         HStack(spacing: 6) {
             terminalControls
             Divider().frame(height: 16)
-            terminalBarCommandControls
-            Spacer()
+            ScrollView(.horizontal, showsIndicators: false) {
+                terminalBarCommandControls
+            }
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+            GitControlsView(gitService: terminalStore.gitService(for: workingDirectory, config: appConfig.git))
+                .id(workingDirectory)
+            Divider().frame(height: 16)
+            windowTabs
+                .frame(maxWidth: 140)
         }
         .buttonStyle(.borderless)
         .padding(.horizontal, 10)
         .padding(.vertical, 2)
         .background(.bar)
-        .overlay(alignment: .trailing) {
-            HStack(spacing: 6) {
-                GitControlsView(gitService: terminalStore.gitService(for: workingDirectory, config: appConfig.git))
-                    .id(workingDirectory)
-                Divider().frame(height: 16)
-                windowTabs
-            }
-            .buttonStyle(.borderless)
-            .padding(.trailing, 10)
-        }
         .task(id: "\(entry.isRunning)-\(entry.currentWindowIndex)-\(entry.activePaneDirectory)") {
             await refreshWorktreeAvailability()
         }
@@ -675,7 +672,6 @@ private struct WindowControlBar: View {
             }
             .padding(.vertical, 4)
         }
-        .fixedSize(horizontal: true, vertical: false)
     }
 }
 
