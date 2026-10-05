@@ -208,6 +208,7 @@ private struct WindowControlBar: View {
     @State private var isCreatingWorktree = false
     @State private var activePaneIsLinkedWorktree = false
     @State private var worktreeErrorMessage: String?
+    @State private var windowTabsWidth: CGFloat = 140
 
     init(
         entry: TerminalEntry,
@@ -241,7 +242,7 @@ private struct WindowControlBar: View {
                 .id(workingDirectory)
             Divider().frame(height: 16)
             windowTabs
-                .frame(maxWidth: 140)
+                .frame(width: min(windowTabsWidth, 140))
         }
         .buttonStyle(.borderless)
         .padding(.horizontal, 10)
@@ -671,6 +672,7 @@ private struct WindowControlBar: View {
                 }
             }
             .padding(.vertical, 4)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { windowTabsWidth = $0 }
         }
     }
 }
