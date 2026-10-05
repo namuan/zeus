@@ -1,0 +1,1 @@
+Fix terminal top bar alignment by sizing window tabs to their content, capped at 140 points; validated with a headless layout check and 103 passing tests run outside Git hooks.
