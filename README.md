@@ -86,7 +86,7 @@ https://github.com/user-attachments/assets/b693f65c-2a82-4836-8168-aefe28c2242c
 
 Configuration is stored as JSON in `~/Library/Application Support/OpenZeus/config.json`.
 
-Task terminal transcripts are stored in `~/Library/Application Support/OpenZeus/Transcripts/`. They are retained after task terminals are closed or deleted. Use **Settings → Data → Open Transcript Directory** to reveal them in Finder. Each task has one direct shell; shells and their running commands stop when Open-Zeus quits. Task sessions cannot be attached from Terminal.app.
+Task terminal transcripts are stored in `~/Library/Application Support/OpenZeus/Transcripts/`. They are retained after task terminals are closed or deleted. Use **Settings → Data → Open Transcript Directory** to reveal them in Finder. Each task has one direct shell; shells and their running commands stop when Open-Zeus quits. Task shells cannot be attached to Terminal.app, so the Terminal.app pop-out control is not available.
 
 ## Install
 

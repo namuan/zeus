@@ -353,12 +353,6 @@ private struct WindowControlBar: View {
         .disabled(task == nil || entry.secondaryPane == nil || entry.primaryPaneClosed)
         .help("Close Active Pane")
 
-        Button {} label: {
-            Image(systemName: "rectangle.portrait.and.arrow.right")
-        }
-        .disabled(true)
-        .help("Pop Out to Terminal.app is unavailable without tmux")
-
         if task != nil {
             Button {
                 logInfo("WindowControlBar: worktree button clicked for task \(task?.id.uuidString ?? "unknown")")
