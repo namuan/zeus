@@ -1,0 +1,1 @@
+Normalize terminal file URLs to paths for app launches, open the active directory in a fresh activated application instance, and log launch outcomes.
