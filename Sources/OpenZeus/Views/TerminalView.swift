@@ -333,18 +333,6 @@ private struct WindowControlBar: View {
         .disabled(task == nil || (entry.secondaryPane != nil && !entry.primaryPaneClosed))
         .help("Split Pane Vertically")
 
-        Button {} label: {
-            Image(systemName: "rectangle.2.swap")
-        }
-        .disabled(true)
-        .help("Rotate Panes is unavailable without tmux")
-
-        Button {} label: {
-            Image(systemName: "arrow.up.left.and.arrow.down.right")
-        }
-        .disabled(true)
-        .help("Zoom Pane is unavailable without tmux")
-
         Button {
             if let task { terminalStore.closeSplitTerminal(taskID: task.id) }
         } label: {

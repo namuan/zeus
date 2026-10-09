@@ -25,6 +25,7 @@ Replace tmux with direct shells attached to Open-Zeus’s terminal view. Each ta
    - Remove tmux window navigation and pane-management dependencies.
    - Keep core terminal functionality such as input, scrolling, theme, and font controls.
    - Provide one app-managed split per task, with a distinct direct shell in each pane and close support.
+   - Remove the tmux-only Zoom Pane and Rotate Panes controls; app-managed splits do not support pane zooming or rotation.
    - Remove “Pop Out to Terminal.app”; a direct shell cannot attach the same running session.
    - Replace tmux-based worktree directory switching. Ensure switching is safe when a command is running, or disable it while busy.
 

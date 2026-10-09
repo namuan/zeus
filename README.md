@@ -15,6 +15,7 @@ https://github.com/user-attachments/assets/b693f65c-2a82-4836-8168-aefe28c2242c
 ### Terminal
 
 - **One direct shell per task** — task shells stay alive while switching between tasks in the app
+- **Split panes** — each task supports one app-managed split with two direct shells; pane zooming and rotation are not supported
 - **Process detection** — live badges show when an agent is running vs idle, with child-process tree traversal
 - **Native terminal scrolling** — SwiftTerm scrollback and auto-copy on selection drag
 - **Configurable font** — set font family, size, and weight in Settings
