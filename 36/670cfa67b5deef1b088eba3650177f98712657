@@ -1,0 +1,1 @@
+Remove the Terminal.app pop-out control because direct shells cannot be attached externally, and document that limitation.
