@@ -1,0 +1,1 @@
+Replace tmux sessions with direct per-task shells and app-managed split panes; add focused-pane close behavior and regression coverage.
