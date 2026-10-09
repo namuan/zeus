@@ -20,6 +20,12 @@ import Testing
     #expect(entry.workingDirectory.isEmpty)
 }
 
+@Test @MainActor func terminalEntryCurrentPaneDirectoryConvertsFileURL() async {
+    let entry = TerminalEntry(taskID: UUID())
+    entry.activePaneDirectory = "file://MacBookPro/Users/nnn/project"
+    #expect(await entry.currentPaneDirectory() == "/Users/nnn/project")
+}
+
 @Test func zeusCommandVariablesExpandProjectDirectoryToken() {
     let command = "./run.sh \(ZeusCommandVariables.projectDirectoryToken)"
     #expect(ZeusCommandVariables.expand(command, projectDirectory: "/tmp/my-project") == "./run.sh /tmp/my-project")

@@ -109,7 +109,9 @@ final class TerminalEntry: ObservableObject {
 
     func currentPaneDirectory(fallback: String? = nil) async -> String {
         let terminal = activeTerminal
-        return terminal.activePaneDirectory.isEmpty ? (fallback ?? terminal.workingDirectory) : terminal.activePaneDirectory
+        let directory = terminal.activePaneDirectory.isEmpty ? (fallback ?? terminal.workingDirectory) : terminal.activePaneDirectory
+        guard let url = URL(string: directory), url.isFileURL else { return directory }
+        return url.path
     }
 
     func changeDirectory(to directory: String) async -> Bool {

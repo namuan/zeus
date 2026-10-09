@@ -1322,13 +1322,25 @@ private struct AppLauncherButton: View {
         Button {
             Task { @MainActor in
                 let directory = await entry.currentPaneDirectory(fallback: workingDirectory)
-                let appURL = URL(fileURLWithPath: app.appPath)
-                let dirURL = URL(fileURLWithPath: directory)
+                let appURL = URL(fileURLWithPath: app.appPath, isDirectory: true)
+                let directoryURL = URL(fileURLWithPath: directory, isDirectory: true)
+                logInfo("AppLauncherButton: opening '\(app.displayName)' at '\(directory)'")
+                let configuration = NSWorkspace.OpenConfiguration()
+                configuration.activates = true
+                configuration.createsNewApplicationInstance = true
                 NSWorkspace.shared.open(
-                    [dirURL],
+                    [directoryURL],
                     withApplicationAt: appURL,
-                    configuration: NSWorkspace.OpenConfiguration()
-                ) { _, _ in }
+                    configuration: configuration
+                ) { _, error in
+                    Task { @MainActor in
+                        if let error {
+                            logError("AppLauncherButton: failed to open '\(app.displayName)': \(error.localizedDescription)")
+                        } else {
+                            logInfo("AppLauncherButton: opened '\(app.displayName)'")
+                        }
+                    }
+                }
             }
         } label: {
             HStack(spacing: 3) {
