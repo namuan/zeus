@@ -2,22 +2,10 @@
   "_comment": "Place this file at ~/Library/Application Support/OpenZeus/config.json. All keys are optional — any missing key uses the default shown here. Changes take effect on next app launch.",
 
   "terminal": {
-    "_comment": "Process and terminal behaviour",
+    "_comment": "Direct-shell and terminal behaviour",
 
     "pollIntervalSeconds": 2.0,
-    "// pollIntervalSeconds": "How often (in seconds) to poll each tmux session for an active process.",
-
-    "tmuxSettleDelayMs": 200,
-    "// tmuxSettleDelayMs": "Milliseconds to wait after tmux window/pane operations before refreshing state.",
-
-    "orphanCleanupIntervalSeconds": 300.0,
-    "// orphanCleanupIntervalSeconds": "How often (in seconds) to scan for and kill orphaned zeus-* tmux sessions.",
-
-    "sigtermGracePeriodMs": 300,
-    "// sigtermGracePeriodMs": "Milliseconds to wait after sending SIGTERM before the tmux session is killed.",
-
-    "mouseModeDelayMs": 300,
-    "// mouseModeDelayMs": "Milliseconds to wait before enabling tmux mouse mode after the session starts.",
+    "// pollIntervalSeconds": "How often (in seconds) to inspect each task shell for an active process."
 
     "defaultShell": "",
     "// defaultShell": "Shell used for new tasks. Empty string means use $SHELL, falling back to /bin/bash.",
@@ -31,16 +19,7 @@
     "fontWeight": "regular",
     "// fontWeight": "Terminal font weight. One of: ultralight, thin, light, regular, medium, semibold, bold, heavy, black.",
 
-    "tmuxSearchPaths": ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"],
-    "// tmuxSearchPaths": "Ordered list of paths to search for the tmux executable.",
-
-    "pkillPath": "/usr/bin/pkill",
-    "// pkillPath": "Absolute path to pkill, used to send SIGTERM to pane child processes.",
-
-    "tmuxSessionPrefix": "zeus-",
-    "// tmuxSessionPrefix": "Prefix for tmux session names (e.g. \"zeus-<task-uuid>\"). Change only if you have conflicts.",
-
-    "knownShells": ["zsh", "bash", "sh", "fish", "dash", "csh", "tcsh", "login", "tmux", "tmux: server"],
+    "knownShells": ["zsh", "bash", "sh", "fish", "dash", "csh", "tcsh", "login"],
     "// knownShells": "Process names considered 'idle' (not an active agent). Extend this list if you use an unusual shell."
   },
 

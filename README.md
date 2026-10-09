@@ -14,14 +14,12 @@ https://github.com/user-attachments/assets/b693f65c-2a82-4836-8168-aefe28c2242c
 
 ### Terminal
 
-- **Persistent sessions** — tmux-backed sessions survive app restarts; attach to a running agent anytime
-- **Multi-window management** — open, close, split (horizontal/vertical), rotate, and zoom panes per task
+- **One direct shell per task** — task shells stay alive while switching between tasks in the app
 - **Process detection** — live badges show when an agent is running vs idle, with child-process tree traversal
-- **Scroll & mouse mode** — trackpad and mouse-wheel scrolling enter tmux copy mode; auto-copy on selection drag
+- **Native terminal scrolling** — SwiftTerm scrollback and auto-copy on selection drag
 - **Configurable font** — set font family, size, and weight in Settings
 - **Shift+Enter support** — kitty keyboard protocol for apps like Claude Code
-- **Orphan cleanup** — periodic scan kills tmux sessions whose tasks no longer exist
-- **Per-pane transcripts** — retained, plain-text transcripts for every tmux-backed task pane; ANSI styling and terminal control codes are removed
+- **Plain-text transcripts** — direct PTY output is sanitized and retained per task session
 
 ### Git Integration
 
@@ -34,17 +32,17 @@ https://github.com/user-attachments/assets/b693f65c-2a82-4836-8168-aefe28c2242c
 ### Git Worktrees
 
 - **Automatic creation** — optionally create a worktree per task with auto-generated branch names
-- **Active-pane creation** — create a UUID-named worktree from a task terminal’s active pane and switch that pane into it
+- **Terminal worktrees** — create a UUID-named worktree from a task terminal and switch the shell into it
 - **Cleanup scanner** — settings tab finds orphaned worktree directories, stale references, and archived-task worktrees
 - **Branch badges** — tasks with worktrees display their branch name
 
 ### Projects & Tasks
 
 - **Search/filter** — searchable project sidebar with name and path matching
-- **Task archiving** — hide completed tasks; optionally kill tmux session and remove worktree on archive
+- **Task archiving** — hide completed tasks; terminate the task shell and optionally remove its worktree on archive
 - **Context menus** — Open in Finder, Open in Terminal, Delete
 - **Task editing** — edit task descriptions via inline pencil button
-- **Active-pane worktrees** — the terminal’s worktree button is available for normal and Quick Tasks when tmux is available and the active pane is idle
+- **Task worktrees** — the terminal’s worktree button is available for normal and Quick Tasks when the shell is idle
 - **Active badges** — open task count and running process indicators per project
 
 ### App Launcher
@@ -78,7 +76,7 @@ https://github.com/user-attachments/assets/b693f65c-2a82-4836-8168-aefe28c2242c
 
 | Tab | Configures |
 |-----|------------|
-| Terminal | Font, shell, tmux prefix, poll intervals, orphan cleanup |
+| Terminal | Font, shell, process-detection polling |
 | Notifications | Alert sound, notification title/body template |
 | Git | Executable path, debounce, remote poll interval |
 | Worktree | Base directory, default branch, create-by-default, cleanup |
@@ -88,7 +86,7 @@ https://github.com/user-attachments/assets/b693f65c-2a82-4836-8168-aefe28c2242c
 
 Configuration is stored as JSON in `~/Library/Application Support/OpenZeus/config.json`.
 
-Task-pane transcripts are stored in `~/Library/Application Support/OpenZeus/Transcripts/`. They are retained after panes, tasks, and projects are closed or deleted. Use **Settings → Data → Open Transcript Directory** to reveal them in Finder. Transcript capture requires tmux; full-screen applications that repeatedly redraw their display may be less linear than normal shell and agent output.
+Task terminal transcripts are stored in `~/Library/Application Support/OpenZeus/Transcripts/`. They are retained after task terminals are closed or deleted. Use **Settings → Data → Open Transcript Directory** to reveal them in Finder. Each task has one direct shell; shells and their running commands stop when Open-Zeus quits. Task sessions cannot be attached from Terminal.app.
 
 ## Install
 
@@ -124,7 +122,6 @@ swift test           # run tests
 
 - macOS 15+ (Sequoia)
 - Swift 6+
-- tmux (recommended — `brew install tmux`)
 - SwiftLint (`brew install swiftlint`)
 
 ## Tech Stack

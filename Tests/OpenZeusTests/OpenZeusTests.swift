@@ -8,7 +8,7 @@ import Testing
 @Test func appConfigDecodesFullJSON() throws {
     let json = """
     {
-        "terminal": { "pollIntervalSeconds": 5.0, "tmuxSessionPrefix": "test-", "theme": "dark" },
+        "terminal": { "pollIntervalSeconds": 5.0, "theme": "dark" },
         "logging": { "maxFileSizeBytes": 1048576 },
         "notifications": { "soundName": "Glass" },
         "storage": { "databaseFileName": "custom.db" },
@@ -18,7 +18,6 @@ import Testing
     """
     let config = try JSONDecoder().decode(AppConfig.self, from: Data(json.utf8))
     #expect(config.terminal.pollIntervalSeconds == 5.0)
-    #expect(config.terminal.tmuxSessionPrefix == "test-")
     #expect(config.terminal.theme == .dark)
     #expect(config.logging.maxFileSizeBytes == 1_048_576)
     #expect(config.notifications.soundName == "Glass")
@@ -35,8 +34,6 @@ import Testing
     let config = try JSONDecoder().decode(AppConfig.self, from: Data(json.utf8))
     #expect(config.terminal.pollIntervalSeconds == 3.0)
     // Missing keys within terminal section fall back to defaults
-    #expect(config.terminal.tmuxSettleDelayMs == 200)
-    #expect(config.terminal.tmuxSessionPrefix == "zeus-")
     #expect(config.terminal.theme == .system)
     // Entirely missing sections fall back to defaults
     #expect(config.logging.maxFileSizeBytes == 5_242_880)
@@ -60,7 +57,6 @@ import Testing
 @Test func appConfigDecodesEmptyObject() throws {
     let config = try JSONDecoder().decode(AppConfig.self, from: Data("{}".utf8))
     #expect(config.terminal.pollIntervalSeconds == 2.0)
-    #expect(config.terminal.tmuxSessionPrefix == "zeus-")
     #expect(config.terminal.theme == .system)
     #expect(config.logging.logsDirectory == "Library/Logs/OpenZeus")
     #expect(config.notifications.notificationTitle == "Agent finished")

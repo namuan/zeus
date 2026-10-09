@@ -172,69 +172,41 @@ enum TerminalTheme: String, CaseIterable, Codable, Sendable {
 
 struct TerminalConfig: Codable, Equatable, Sendable {
     var pollIntervalSeconds: Double
-    var tmuxSettleDelayMs: Int
-    var orphanCleanupIntervalSeconds: Double
-    var sigtermGracePeriodMs: Int
-    var mouseModeDelayMs: Int
     var defaultShell: String
     var fontFamily: String
     var fontSize: Int
     var fontWeight: String
     var theme: TerminalTheme
-    var tmuxSearchPaths: [String]
-    var pkillPath: String
-    var tmuxSessionPrefix: String
     var knownShells: [String]
 
     init(
         pollIntervalSeconds: Double = 2.0,
-        tmuxSettleDelayMs: Int = 200,
-        orphanCleanupIntervalSeconds: Double = 300.0,
-        sigtermGracePeriodMs: Int = 300,
-        mouseModeDelayMs: Int = 300,
         defaultShell: String = "",
         fontFamily: String = "monospacedSystemFont",
         fontSize: Int = 13,
         fontWeight: String = "regular",
         theme: TerminalTheme = .system,
-        tmuxSearchPaths: [String] = ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"],
-        pkillPath: String = "/usr/bin/pkill",
-        tmuxSessionPrefix: String = "zeus-",
-        knownShells: [String] = ["zsh", "bash", "sh", "fish", "dash", "csh", "tcsh", "login", "tmux", "tmux: server"]
+        knownShells: [String] = ["zsh", "bash", "sh", "fish", "dash", "csh", "tcsh", "login"]
     ) {
         self.pollIntervalSeconds = pollIntervalSeconds
-        self.tmuxSettleDelayMs = tmuxSettleDelayMs
-        self.orphanCleanupIntervalSeconds = orphanCleanupIntervalSeconds
-        self.sigtermGracePeriodMs = sigtermGracePeriodMs
-        self.mouseModeDelayMs = mouseModeDelayMs
         self.defaultShell = defaultShell
         self.fontFamily = fontFamily
         self.fontSize = fontSize
         self.fontWeight = fontWeight
         self.theme = theme
-        self.tmuxSearchPaths = tmuxSearchPaths
-        self.pkillPath = pkillPath
-        self.tmuxSessionPrefix = tmuxSessionPrefix
         self.knownShells = knownShells
     }
 
     init(from decoder: Decoder) throws {
-        let d = TerminalConfig()
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        pollIntervalSeconds        = (try? c.decode(Double.self, forKey: .pollIntervalSeconds))        ?? d.pollIntervalSeconds
-        tmuxSettleDelayMs          = (try? c.decode(Int.self, forKey: .tmuxSettleDelayMs))          ?? d.tmuxSettleDelayMs
-        orphanCleanupIntervalSeconds = (try? c.decode(Double.self, forKey: .orphanCleanupIntervalSeconds)) ?? d.orphanCleanupIntervalSeconds
-        sigtermGracePeriodMs       = (try? c.decode(Int.self, forKey: .sigtermGracePeriodMs))       ?? d.sigtermGracePeriodMs
-        mouseModeDelayMs           = (try? c.decode(Int.self, forKey: .mouseModeDelayMs))           ?? d.mouseModeDelayMs
-        defaultShell               = (try? c.decode(String.self, forKey: .defaultShell))               ?? d.defaultShell
-        fontFamily                 = (try? c.decode(String.self, forKey: .fontFamily))                 ?? d.fontFamily
-        fontSize                   = (try? c.decode(Int.self, forKey: .fontSize))                   ?? d.fontSize
-        fontWeight                 = (try? c.decode(String.self, forKey: .fontWeight))                 ?? d.fontWeight
-        theme                      = (try? c.decode(TerminalTheme.self, forKey: .theme))                ?? d.theme
-        tmuxSearchPaths            = (try? c.decode([String].self, forKey: .tmuxSearchPaths))            ?? d.tmuxSearchPaths
-        pkillPath                  = (try? c.decode(String.self, forKey: .pkillPath))                  ?? d.pkillPath
-        tmuxSessionPrefix          = (try? c.decode(String.self, forKey: .tmuxSessionPrefix))          ?? d.tmuxSessionPrefix
-        knownShells                = (try? c.decode([String].self, forKey: .knownShells))                ?? d.knownShells
+        let defaults = TerminalConfig()
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        pollIntervalSeconds = (try? container.decode(Double.self, forKey: .pollIntervalSeconds)) ?? defaults.pollIntervalSeconds
+        defaultShell = (try? container.decode(String.self, forKey: .defaultShell)) ?? defaults.defaultShell
+        fontFamily = (try? container.decode(String.self, forKey: .fontFamily)) ?? defaults.fontFamily
+        fontSize = (try? container.decode(Int.self, forKey: .fontSize)) ?? defaults.fontSize
+        fontWeight = (try? container.decode(String.self, forKey: .fontWeight)) ?? defaults.fontWeight
+        theme = (try? container.decode(TerminalTheme.self, forKey: .theme)) ?? defaults.theme
+        knownShells = (try? container.decode([String].self, forKey: .knownShells)) ?? defaults.knownShells
     }
 
     var resolvedShell: String {

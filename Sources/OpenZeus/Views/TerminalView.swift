@@ -100,45 +100,74 @@ private struct TerminalPaneContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if !entry.tmuxUnavailable {
-                WindowControlBar(
-                    entry: entry,
-                    task: task,
-                    projectID: projectID,
-                    projectName: projectName,
-                    workingDirectory: activeWorkingDirectory,
-                    terminalVisible: $terminalVisible,
-                    onWorkingDirectoryChanged: { activeWorkingDirectory = $0 }
-                )
-                Divider()
-            }
+            WindowControlBar(
+                entry: entry,
+                task: task,
+                projectID: projectID,
+                projectName: projectName,
+                workingDirectory: activeWorkingDirectory,
+                terminalVisible: $terminalVisible,
+                onWorkingDirectoryChanged: { activeWorkingDirectory = $0 }
+            )
+            Divider()
             AppLauncherBar(entry: entry, projectID: projectID, workingDirectory: activeWorkingDirectory)
             Divider()
-            if entry.tmuxUnavailable {
-                Label("tmux not found — sessions won't persist", systemImage: "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .padding()
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.bar)
-            }
             if terminalVisible {
-                TerminalRepresentable(sessionID: sessionID, command: command, workingDirectory: workingDirectory, entry: entry, terminalConfig: appConfig.terminal)
+                terminalContent
             } else {
                 Color.clear
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .navigationTitle(navigationTitle)
-        .task(id: entry.isRunning) {
-            guard entry.isRunning else { return }
-            let directory = await entry.currentPaneDirectory(fallback: workingDirectory)
-            activeWorkingDirectory = directory
-        }
         .onChange(of: entry.activePaneDirectory) { _, directory in
             if !directory.isEmpty {
                 activeWorkingDirectory = directory
             }
+        }
+        .onChange(of: entry.focusedPaneID) { _, _ in
+            activeWorkingDirectory = entry.activeTerminal.workingDirectory
+        }
+    }
+
+    @ViewBuilder
+    private var terminalContent: some View {
+        if entry.primaryPaneClosed, let secondaryPane = entry.secondaryPane {
+            terminalView(for: secondaryPane)
+        } else if let secondaryPane = entry.secondaryPane, let orientation = entry.splitOrientation {
+            switch orientation {
+            case .horizontal:
+                HStack(spacing: 1) {
+                    terminalView(for: entry)
+                    Divider()
+                    terminalView(for: secondaryPane)
+                }
+            case .vertical:
+                VStack(spacing: 1) {
+                    terminalView(for: entry)
+                    Divider()
+                    terminalView(for: secondaryPane)
+                }
+            }
+        } else {
+            terminalView(for: entry)
+        }
+    }
+
+    private func terminalView(for pane: TerminalEntry) -> some View {
+        TerminalRepresentable(
+            sessionID: sessionID,
+            command: command,
+            workingDirectory: pane.workingDirectory.isEmpty ? workingDirectory : pane.workingDirectory,
+            entry: pane,
+            terminalConfig: appConfig.terminal,
+            onFocus: { entry.focusPane(pane.paneID) }
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay {
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(entry.focusedPaneID == pane.paneID ? Color.accentColor : Color.clear, lineWidth: 1)
+                .allowsHitTesting(false)
         }
     }
 }
@@ -208,7 +237,6 @@ private struct WindowControlBar: View {
     @State private var isCreatingWorktree = false
     @State private var activePaneIsLinkedWorktree = false
     @State private var worktreeErrorMessage: String?
-    @State private var windowTabsWidth: CGFloat = 140
 
     init(
         entry: TerminalEntry,
@@ -219,7 +247,6 @@ private struct WindowControlBar: View {
         terminalVisible: Binding<Bool>,
         onWorkingDirectoryChanged: @escaping (String) -> Void
     ) {
-        logDebug("WindowControlBar.init: projectID=\(projectID), windows.count=\(entry.windows.count)")
         self._entry = ObservedObject(wrappedValue: entry)
         self.task = task
         self.projectID = projectID
@@ -240,15 +267,12 @@ private struct WindowControlBar: View {
             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             GitControlsView(gitService: terminalStore.gitService(for: workingDirectory, config: appConfig.git))
                 .id(workingDirectory)
-            Divider().frame(height: 16)
-            windowTabs
-                .frame(width: min(windowTabsWidth, 140))
         }
         .buttonStyle(.borderless)
         .padding(.horizontal, 10)
         .padding(.vertical, 2)
         .background(.bar)
-        .task(id: "\(entry.isRunning)-\(entry.currentWindowIndex)-\(entry.activePaneDirectory)") {
+        .task(id: "\(entry.activeTerminal.isRunning)-\(entry.focusedPaneID)-\(entry.activePaneDirectory)") {
             await refreshWorktreeAvailability()
         }
         .alert(
@@ -267,87 +291,73 @@ private struct WindowControlBar: View {
     @ViewBuilder
     private var terminalControls: some View {
         Button {
-            logInfo("WindowControlBar: + button clicked, terminalVisible=\(terminalVisible)")
-            if terminalVisible {
-                entry.openWindow()
-            } else {
-                terminalVisible = true
-            }
+            terminalVisible.toggle()
         } label: {
+            Image(systemName: terminalVisible ? "eye.slash" : "eye")
+        }
+        .help(terminalVisible ? "Hide Terminal" : "Show Terminal")
+
+        Button {} label: {
             Image(systemName: "plus")
         }
-        .help("New Window")
+        .disabled(true)
+        .help("New Window is unavailable without tmux")
 
-        Button {
-            logInfo("WindowControlBar: chevron.left button clicked")
-            entry.previousWindow()
-        } label: {
+        Button {} label: {
             Image(systemName: "chevron.left")
         }
-        .disabled(entry.windows.count <= 1)
-        .help("Previous Window")
+        .disabled(true)
+        .help("Previous Window is unavailable without tmux")
 
-        Button {
-            logInfo("WindowControlBar: chevron.right button clicked")
-            entry.nextWindow()
-        } label: {
+        Button {} label: {
             Image(systemName: "chevron.right")
         }
-        .disabled(entry.windows.count <= 1)
-        .help("Next Window")
+        .disabled(true)
+        .help("Next Window is unavailable without tmux")
 
         Divider().frame(height: 16)
 
         Button {
-            logInfo("WindowControlBar: split horizontal button clicked")
-            entry.splitHorizontal()
+            if let task { terminalStore.splitTerminal(taskID: task.id, orientation: .horizontal) }
         } label: {
             Image(systemName: "rectangle.split.2x1")
         }
+        .disabled(task == nil || (entry.secondaryPane != nil && !entry.primaryPaneClosed))
         .help("Split Pane Horizontally")
 
         Button {
-            logInfo("WindowControlBar: split vertical button clicked")
-            entry.splitVertical()
+            if let task { terminalStore.splitTerminal(taskID: task.id, orientation: .vertical) }
         } label: {
             Image(systemName: "rectangle.split.1x2")
         }
+        .disabled(task == nil || (entry.secondaryPane != nil && !entry.primaryPaneClosed))
         .help("Split Pane Vertically")
 
-        Button {
-            logInfo("WindowControlBar: rotate pane button clicked")
-            entry.rotatePane()
-        } label: {
+        Button {} label: {
             Image(systemName: "rectangle.2.swap")
         }
-        .disabled(entry.paneCount <= 1)
-        .help("Rotate Panes")
+        .disabled(true)
+        .help("Rotate Panes is unavailable without tmux")
 
-        Button {
-            logInfo("WindowControlBar: zoom pane button clicked")
-            entry.togglePaneZoom()
-        } label: {
+        Button {} label: {
             Image(systemName: "arrow.up.left.and.arrow.down.right")
         }
-        .disabled(entry.paneCount <= 1)
-        .help("Zoom Pane")
+        .disabled(true)
+        .help("Zoom Pane is unavailable without tmux")
 
         Button {
-            logInfo("WindowControlBar: xmark (close) button clicked")
-            entry.closeWindow()
+            if let task { terminalStore.closeSplitTerminal(taskID: task.id) }
         } label: {
             Image(systemName: "xmark")
         }
-        .disabled(entry.windows.count <= 1)
-        .help("Close Window")
+        .disabled(task == nil || entry.secondaryPane == nil || entry.primaryPaneClosed)
+        .help("Close Active Pane")
 
-        Button {
-            logInfo("WindowControlBar: pop out button clicked")
-            entry.popOut()
-        } label: {
+        Button {} label: {
             Image(systemName: "rectangle.portrait.and.arrow.right")
         }
-        .help("Pop Out to Terminal.app")
+        .disabled(true)
+        .help("Pop Out to Terminal.app is unavailable without tmux")
 
         if task != nil {
             Button {
@@ -376,8 +386,8 @@ private struct WindowControlBar: View {
         .help("Quick Commands")
         .popover(isPresented: $showCommands) {
             QuickCommandsPopover(projectID: projectID) { command in
-                logInfo("WindowControlBar: quick command '\(command)' sent, hasActiveProcess=\(entry.hasActiveProcess)")
-                entry.sendCommand(command, inNewVerticalPane: entry.hasActiveProcess)
+                logInfo("WindowControlBar: quick command '\(command)' sent, hasActiveProcess=\(entry.activeTerminal.hasActiveProcess)")
+                entry.sendCommand(command)
                 showCommands = false
             }
             .environmentObject(db)
@@ -386,10 +396,9 @@ private struct WindowControlBar: View {
 
     private var canCreateTaskWorktree: Bool {
         task != nil
-            && entry.isRunning
-            && !entry.tmuxUnavailable
+            && entry.activeTerminal.isRunning
             && !appConfig.worktree.resolvedBasePath.isEmpty
-            && !entry.hasActiveProcess
+            && !entry.activeTerminal.hasActiveProcess
             && !activePaneIsLinkedWorktree
             && !isCreatingWorktree
     }
@@ -399,16 +408,16 @@ private struct WindowControlBar: View {
             return "Configure a worktree base path in Settings"
         }
         if activePaneIsLinkedWorktree {
-            return "The active pane is already in a Git worktree"
+            return "The terminal is already in a Git worktree"
         }
-        if entry.hasActiveProcess {
+        if entry.activeTerminal.hasActiveProcess {
             return "Wait for the active process to finish before creating a worktree"
         }
-        return "Create task worktree and switch this pane"
+        return "Create task worktree and switch the terminal"
     }
 
     private func refreshWorktreeAvailability() async {
-        guard task != nil, entry.isRunning, !entry.tmuxUnavailable else {
+        guard task != nil, entry.activeTerminal.isRunning else {
             activePaneIsLinkedWorktree = false
             return
         }
@@ -451,7 +460,7 @@ private struct WindowControlBar: View {
                 )
                 createdWorktree = true
             }
-            guard !entry.hasActiveProcess else {
+            guard !entry.activeTerminal.hasActiveProcess else {
                 if createdWorktree {
                     await service.removeWorktree(
                         worktreePath: result.path,
@@ -460,7 +469,7 @@ private struct WindowControlBar: View {
                         deleteBranch: true
                     )
                 }
-                throw WorktreeError.gitCommandFailed("The active pane started a process before it could switch directories.")
+                throw WorktreeError.gitCommandFailed("A task command started before the shell could switch directories.")
             }
             guard await entry.changeDirectory(to: result.path) else {
                 if createdWorktree {
@@ -471,9 +480,8 @@ private struct WindowControlBar: View {
                         deleteBranch: true
                     )
                 }
-                throw WorktreeError.gitCommandFailed("tmux is unavailable.")
+                throw WorktreeError.gitCommandFailed("The terminal is not idle or is not running.")
             }
-            try? await Task.sleep(for: .milliseconds(appConfig.terminal.tmuxSettleDelayMs))
             let updatedDirectory = await entry.currentPaneDirectory(fallback: activeDirectory)
             guard WorktreeService.pathsReferToSameLocation(updatedDirectory, result.path) else {
                 if createdWorktree {
@@ -484,9 +492,9 @@ private struct WindowControlBar: View {
                         deleteBranch: true
                     )
                 }
-                throw WorktreeError.gitCommandFailed("The terminal could not switch to the new worktree.")
+                throw WorktreeError.gitCommandFailed("The terminal did not confirm the new working directory.")
             }
-            entry.workingDirectory = updatedDirectory
+            entry.activeTerminal.workingDirectory = updatedDirectory
             terminalStore.removeGitService(for: workingDirectory)
             onWorkingDirectoryChanged(updatedDirectory)
             activePaneIsLinkedWorktree = true
@@ -644,37 +652,6 @@ private struct WindowControlBar: View {
         UserDefaults.standard.set(data, forKey: terminalBarCommandsStorageKey)
     }
 
-    private var windowTabs: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 3) {
-                ForEach(entry.windows, id: \.index) { window in
-                    Button {
-                        logInfo("WindowControlBar: window tab clicked, index=\(window.index), name='\(window.name)'")
-                        entry.selectWindow(index: window.index)
-                    } label: {
-                        Text(window.name)
-                            .font(.caption)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(
-                                window.index == entry.currentWindowIndex
-                                    ? Color.accentColor
-                                    : Color.primary.opacity(0.1)
-                            )
-                            .foregroundStyle(
-                                window.index == entry.currentWindowIndex
-                                    ? Color.white
-                                    : Color.primary
-                            )
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.vertical, 4)
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { windowTabsWidth = $0 }
-        }
-    }
 }
 
 private struct TerminalBarCommandEditorPopover: View {
@@ -1404,12 +1381,8 @@ private struct AppLauncherButton: View {
 
 
 final class TerminalContainerView: NSView {
-    var sessionName: String?
-    var tmuxExecutablePath: String?
+    var onFocus: (() -> Void)?
     nonisolated(unsafe) private var didSelectionDrag = false
-    private var preciseScrollRemainder: CGFloat = 0
-    private var pendingScrollSteps = 0
-    private var scrollFlushTask: Task<Void, Never>?
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         bounds.contains(point) ? self : nil
@@ -1419,75 +1392,34 @@ final class TerminalContainerView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         didSelectionDrag = false
+        onFocus?()
         window?.makeFirstResponder(subviews.first)
         subviews.first?.mouseDown(with: event)
     }
+
     override func mouseUp(with event: NSEvent) {
         subviews.first?.mouseUp(with: event)
         if didSelectionDrag, let terminalView = subviews.first as? TerminalView {
-            logInfo("Auto-copying terminal selection to clipboard")
             terminalView.copy(self)
         }
         didSelectionDrag = false
     }
+
     override func mouseDragged(with event: NSEvent) {
         didSelectionDrag = true
         subviews.first?.mouseDragged(with: event)
     }
-    override func mouseMoved(with event: NSEvent) { subviews.first?.mouseMoved(with: event) }
+
+    override func mouseMoved(with event: NSEvent) {
+        subviews.first?.mouseMoved(with: event)
+    }
 
     override func scrollWheel(with event: NSEvent) {
-        guard sessionName != nil, tmuxExecutablePath != nil else {
-            subviews.first?.scrollWheel(with: event) ?? super.scrollWheel(with: event)
+        guard let terminalView = subviews.first else {
+            super.scrollWheel(with: event)
             return
         }
-
-        let delta = event.scrollingDeltaY
-        guard delta != 0 else { return }
-
-        if event.hasPreciseScrollingDeltas {
-            preciseScrollRemainder += delta
-            let steps = Int(abs(preciseScrollRemainder) / 8)
-            guard steps > 0 else { return }
-            let signedSteps = preciseScrollRemainder > 0 ? steps : -steps
-            preciseScrollRemainder -= CGFloat(signedSteps * 8)
-            pendingScrollSteps += signedSteps
-        } else {
-            let steps = max(1, Int(abs(delta).rounded()))
-            pendingScrollSteps += delta > 0 ? steps : -steps
-        }
-
-        scheduleScrollFlush()
-    }
-
-    private func scheduleScrollFlush() {
-        guard scrollFlushTask == nil else { return }
-        scrollFlushTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(16))
-            guard let self else { return }
-            await self.flushPendingScroll()
-        }
-    }
-
-    private func flushPendingScroll() async {
-        let steps = pendingScrollSteps
-        pendingScrollSteps = 0
-
-        if steps > 0, let sessionName, let tmuxExecutablePath {
-            await runProcessOutput(tmuxExecutablePath, args: ["copy-mode", "-t", sessionName])
-            await runProcessOutput(tmuxExecutablePath, args: [
-                "send-keys", "-X", "-N", "\(steps)", "-t", sessionName, "scroll-up",
-            ])
-        } else if steps < 0, let sessionName, let tmuxExecutablePath {
-            await runProcessOutput(tmuxExecutablePath, args: [
-                "send-keys", "-X", "-N", "\(-steps)", "-t", sessionName, "scroll-down",
-            ])
-        }
-
-        scrollFlushTask = nil
-        if pendingScrollSteps != 0 {
-            scheduleScrollFlush()
-        }
+        terminalView.scrollWheel(with: event)
     }
 }
 
@@ -1497,6 +1429,7 @@ private struct TerminalRepresentable: NSViewRepresentable {
     let workingDirectory: String
     @ObservedObject var entry: TerminalEntry
     let terminalConfig: TerminalConfig
+    let onFocus: () -> Void
     @EnvironmentObject private var appDatabase: AppDatabase
     @Environment(\.colorScheme) private var colorScheme
 
@@ -1506,7 +1439,7 @@ private struct TerminalRepresentable: NSViewRepresentable {
     }
 
     func updateNSView(_ container: TerminalContainerView, context: Context) {
-        container.tmuxExecutablePath = tmuxExecutable(searchPaths: terminalConfig.tmuxSearchPaths)
+        container.onFocus = onFocus
         let terminalView = entry.terminalView
         logDebug("TerminalRepresentable.updateNSView: session=\(sessionID), process running=\(terminalView.process?.running ?? false)")
 
@@ -1531,67 +1464,41 @@ private struct TerminalRepresentable: NSViewRepresentable {
             if !entry.isRunning {
                 entry.isRunning = true
             }
-            if let sessionName = container.sessionName, let tmux = tmuxExecutable(searchPaths: terminalConfig.tmuxSearchPaths) {
-                Task {
-                    try? await Task.sleep(for: .milliseconds(terminalConfig.mouseModeDelayMs))
-                    logDebug("TerminalRepresentable.updateNSView: ensuring tmux mouse mode is enabled")
-                    await runProcessOutput(tmux, args: ["set-option", "-t", sessionName, "mouse", "on"])
-                    await runProcessOutput(tmux, args: ["set-option", "-w", "-t", sessionName, "focus-follows-mouse", "on"])
-                }
-            }
             logDebug("TerminalRepresentable.updateNSView: process already running, skipping")
             return
         }
 
         let shell = command.isEmpty ? terminalConfig.resolvedShell : command
-        logInfo("TerminalRepresentable.updateNSView: starting process, shell='\(shell)', cwd='\(workingDirectory)'")
+        let paneWorkingDirectory = entry.workingDirectory.isEmpty ? workingDirectory : entry.workingDirectory
+        logInfo("TerminalRepresentable.updateNSView: starting process, shell='\(shell)', cwd='\(paneWorkingDirectory)'")
 
         let startupCommand: String?
         do {
-            startupCommand = try appDatabase.takeTaskStartupCommand(taskID: sessionID)
+            startupCommand = entry.isPrimaryPane ? try appDatabase.takeTaskStartupCommand(taskID: sessionID) : nil
         } catch {
             logError("Unable to claim task startup command: \(error)")
             return
         }
 
-        if let tmux = tmuxExecutable(searchPaths: terminalConfig.tmuxSearchPaths) {
-            let sessionName = "\(terminalConfig.tmuxSessionPrefix)\(sessionID.uuidString)"
-            container.sessionName = sessionName
-            logInfo("TerminalRepresentable.updateNSView: starting tmux session '\(sessionName)'")
-            terminalView.startProcess(
-                executable: tmux,
-                args: TaskStartupCommand.tmuxLaunchArguments(
-                    sessionName: sessionName,
-                    shell: shell,
-                    workingDirectory: workingDirectory,
-                    startupCommand: startupCommand
-                ),
-                currentDirectory: workingDirectory
-            )
-            Task {
-                try? await Task.sleep(for: .milliseconds(terminalConfig.mouseModeDelayMs))
-                logDebug("TerminalRepresentable.updateNSView: enabling tmux mouse mode")
-                await runProcessOutput(tmux, args: ["set-option", "-t", sessionName, "mouse", "on"])
-                await runProcessOutput(tmux, args: ["set-option", "-w", "-t", sessionName, "focus-follows-mouse", "on"])
-            }
-        } else {
-            logWarning("TerminalRepresentable.updateNSView: tmux not found, using direct shell")
-            entry.tmuxUnavailable = true
-            terminalView.startProcess(
-                executable: shell,
-                args: ["-l"],
-                currentDirectory: workingDirectory
-            )
-            if let startupCommand, terminalView.process?.running == true {
-                let bytes = Array((startupCommand + "\n").utf8)
-                terminalView.send(data: bytes[...])
+        terminalView.startProcess(
+            executable: shell,
+            args: ["-l"],
+            currentDirectory: paneWorkingDirectory
+        )
+        if let startupCommand {
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(150))
+                guard terminalView.process?.running == true else { return }
+                terminalView.send(data: Array((startupCommand + "\n").utf8)[...])
             }
         }
 
         logInfo("TerminalRepresentable.updateNSView: marking entry as running")
         entry.isRunning = true
-        Task { @MainActor in
-            terminalView.window?.makeFirstResponder(terminalView)
+        if entry.isPrimaryPane {
+            Task { @MainActor in
+                terminalView.window?.makeFirstResponder(terminalView)
+            }
         }
     }
 }

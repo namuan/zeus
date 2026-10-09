@@ -130,28 +130,13 @@ private struct TerminalTab: View {
                     .help("Empty uses $SHELL, falling back to /bin/bash.")
             }
 
-            Section("Timing") {
-                DoubleRow("Poll interval", value: $config.pollIntervalSeconds, unit: "s")
-                    .help("How often to check each tmux session for an active process.")
-                IntFieldRow("Tmux settle delay", value: $config.tmuxSettleDelayMs, unit: "ms")
-                    .help("Wait after tmux window/pane operations before refreshing state.")
-                IntFieldRow("Mouse mode delay", value: $config.mouseModeDelayMs, unit: "ms")
-                IntFieldRow("SIGTERM grace period", value: $config.sigtermGracePeriodMs, unit: "ms")
-                DoubleRow("Orphan cleanup interval", value: $config.orphanCleanupIntervalSeconds, unit: "s")
-                    .help("How often to scan for and kill orphaned tmux sessions.")
-            }
-
-            Section("Tmux") {
-                TextField("Session prefix", text: $config.tmuxSessionPrefix)
-                    .help("Prefix for tmux session names (e.g. \"zeus-<task-uuid>\").")
-                TextField("pkill path", text: $config.pkillPath)
-                ArrayField("Search paths", array: $config.tmuxSearchPaths)
-            }
-
             Section("Process Detection") {
+                DoubleRow("Poll interval", value: $config.pollIntervalSeconds, unit: "s")
+                    .help("How often to check each task shell for an active command.")
                 ArrayField("Known shells", array: $config.knownShells)
                     .help("Process names considered idle. One per line.")
             }
+
         }
         .formStyle(.grouped)
     }
@@ -485,7 +470,7 @@ private struct WorktreeTab: View {
 
             Section {
                 HStack {
-                    Text("Scan for orphaned worktrees and tmux sessions no longer tied to any task.")
+                    Text("Scan for worktrees no longer tied to any task.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -588,25 +573,6 @@ private struct WorktreeTab: View {
         isScanning = true
         var found: [CleanupItem] = []
 
-        if let tmux = tmuxExecutable(searchPaths: terminalConfig.tmuxSearchPaths) {
-            let output = await runProcessOutput(tmux, args: ["list-sessions", "-F", "#{session_name}"])
-            let prefix = terminalConfig.tmuxSessionPrefix
-            let knownIDs = Set(appDatabase.tasks.lazy.map { $0.id })
-            for line in output.components(separatedBy: .newlines) {
-                let session = line.trimmingCharacters(in: .whitespaces)
-                guard session.hasPrefix(prefix) else { continue }
-                let uuidString = String(session.dropFirst(prefix.count))
-                guard let uuid = UUID(uuidString: uuidString) else { continue }
-                guard !knownIDs.contains(uuid) else { continue }
-                found.append(CleanupItem(
-                    kind: .orphanedTmuxSession(sessionName: session),
-                    title: "Orphaned tmux session",
-                    detail: session,
-                    reason: "No task with ID \(uuidString.prefix(8))… exists in the database"
-                ))
-            }
-        }
-
         for task in appDatabase.tasks {
             if let path = task.worktreePath {
                 if task.isArchived {
@@ -704,17 +670,6 @@ private struct WorktreeTab: View {
         }
 
         switch item.kind {
-        case .orphanedTmuxSession(let sessionName):
-            if let tmux = tmuxExecutable(searchPaths: terminalConfig.tmuxSearchPaths) {
-                await terminateSessionProcesses(
-                    sessionName: sessionName,
-                    tmux: tmux,
-                    pkillPath: terminalConfig.pkillPath,
-                    sigtermGracePeriodMs: terminalConfig.sigtermGracePeriodMs
-                )
-                await runProcessOutput(tmux, args: ["kill-session", "-t", sessionName])
-            }
-
         case .archivedTaskWithWorktree(let task):
             guard let path = task.worktreePath, let branch = task.worktreeBranch else { break }
             let repoPath = task.workingDirectory.path(percentEncoded: false)
@@ -822,7 +777,7 @@ private struct DataTab: View {
 
             Section("Terminal Transcripts") {
                 HStack {
-                    Text("Plain-text transcripts are retained for every tmux task pane.")
+                    Text("Direct-shell transcript recording is not available in this POC.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -927,7 +882,6 @@ private struct LLMTab: View {
 // MARK: - Cleanup
 
 private enum CleanupItemKind {
-    case orphanedTmuxSession(sessionName: String)
     case archivedTaskWithWorktree(task: AgentTask)
     case archivedTaskWithDerivedWorktree(task: AgentTask)
     case staleWorktreeReference(task: AgentTask)
@@ -942,7 +896,6 @@ private struct CleanupItem: Identifiable {
     let reason: String
     var tagColor: Color {
         switch kind {
-        case .orphanedTmuxSession: .red
         case .archivedTaskWithWorktree, .archivedTaskWithDerivedWorktree: .orange
         case .staleWorktreeReference: .secondary
         case .orphanedWorktreeDirectory: .red
@@ -950,7 +903,6 @@ private struct CleanupItem: Identifiable {
     }
     var tagLabel: String {
         switch kind {
-        case .orphanedTmuxSession: "tmux"
         case .archivedTaskWithWorktree, .archivedTaskWithDerivedWorktree: "worktree"
         case .staleWorktreeReference: "stale ref"
         case .orphanedWorktreeDirectory: "orphaned"

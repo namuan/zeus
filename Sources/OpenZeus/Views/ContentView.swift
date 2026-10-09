@@ -25,13 +25,9 @@ struct ContentView: View {
             .background(SidebarToggleRemover())
             .task {
                 restoreSelection()
-                terminalStore.startPeriodicCleanup(interval: appConfig.terminal.orphanCleanupIntervalSeconds) {
-                    Set(appDatabase.tasks.filter { !$0.isArchived }.map { $0.id }
-                        + appDatabase.projects.filter { !$0.isDeleted }.map { $0.id })
-                }
-                terminalStore.startTranscriptSync(interval: appConfig.terminal.pollIntervalSeconds) {
-                    Set(appDatabase.tasks.filter { !$0.isArchived }.map(\.id))
-                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+                terminalStore.terminateAllTerminals()
             }
             .onChange(of: selectedTask) { _, newTask in
                 saveTaskSelection(newTask)

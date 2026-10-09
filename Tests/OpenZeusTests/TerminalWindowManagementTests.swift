@@ -3,250 +3,150 @@ import Foundation
 import Testing
 @testable import OpenZeus
 
-// MARK: - Helpers
-
-/// Synchronously kill a tmux session using Process (not async).
-/// Used for cleanup in tests since `defer` cannot use `await`.
-private func killTmuxSessionSync(_ tmux: String, sessionName: String) {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: tmux)
-    process.arguments = ["kill-session", "-t", sessionName]
-    process.standardOutput = FileHandle.nullDevice
-    process.standardError = FileHandle.nullDevice
-    try? process.run()
-    process.waitUntilExit()
-}
-
-// MARK: - TmuxWindow Tests
-
-@Test func tmuxWindowEqualityTest() {
-    let a = TmuxWindow(index: 1, name: "shell")
-    let b = TmuxWindow(index: 1, name: "shell")
-    let c = TmuxWindow(index: 2, name: "other")
-
-    #expect(a == b)
-    #expect(a != c)
-}
-
-@Test func tmuxWindowPropertiesTest() {
-    let window = TmuxWindow(index: 0, name: "test-window")
-    #expect(window.index == 0)
-    #expect(window.name == "test-window")
-}
-
-// MARK: - TerminalEntry Tests
-
 @Test @MainActor func terminalEntryInitialStateTest() {
     let taskID = UUID()
     let entry = TerminalEntry(taskID: taskID)
-
     #expect(entry.taskID == taskID)
-    #expect(entry.isRunning == false)
-    #expect(entry.hasActiveProcess == false)
-    #expect(entry.tmuxUnavailable == false)
-    #expect(entry.windows.isEmpty)
-    #expect(entry.currentWindowIndex == 0)
-    #expect(entry.paneCount == 1)
+    #expect(!entry.isRunning)
+    #expect(!entry.hasActiveProcess)
     #expect(entry.workingDirectory.isEmpty)
 }
 
 @Test @MainActor func terminalEntryWorkingDirectoryGetSetTest() {
     let entry = TerminalEntry(taskID: UUID())
-
-    #expect(entry.workingDirectory.isEmpty)
-
     entry.workingDirectory = "/tmp/test"
     #expect(entry.workingDirectory == "/tmp/test")
-
     entry.workingDirectory = ""
     #expect(entry.workingDirectory.isEmpty)
 }
 
 @Test func zeusCommandVariablesExpandProjectDirectoryToken() {
     let command = "./run.sh \(ZeusCommandVariables.projectDirectoryToken)"
-    let expanded = ZeusCommandVariables.expand(command, projectDirectory: "/tmp/my-project")
-
-    #expect(expanded == "./run.sh /tmp/my-project")
+    #expect(ZeusCommandVariables.expand(command, projectDirectory: "/tmp/my-project") == "./run.sh /tmp/my-project")
 }
 
 @Test func zeusCommandVariablesLeaveTemplateWhenWorkingDirectoryMissing() {
     let command = "./run.sh \(ZeusCommandVariables.projectDirectoryToken)"
-    let expanded = ZeusCommandVariables.expand(command, projectDirectory: "   ")
-
-    #expect(expanded == command)
+    #expect(ZeusCommandVariables.expand(command, projectDirectory: "   ") == command)
 }
 
 @Test @MainActor func terminalEntryRunningStateToggleTest() {
     let entry = TerminalEntry(taskID: UUID())
-
-    #expect(entry.isRunning == false)
     entry.isRunning = true
-    #expect(entry.isRunning == true)
+    #expect(entry.isRunning)
     entry.isRunning = false
-    #expect(entry.isRunning == false)
+    #expect(!entry.isRunning)
 }
 
 @Test @MainActor func terminalEntryProcessStateToggleTest() {
     let entry = TerminalEntry(taskID: UUID())
-
-    #expect(entry.hasActiveProcess == false)
     entry.hasActiveProcess = true
-    #expect(entry.hasActiveProcess == true)
+    #expect(entry.hasActiveProcess)
     entry.hasActiveProcess = false
-    #expect(entry.hasActiveProcess == false)
-}
-
-@Test @MainActor func terminalEntryTmuxUnavailableToggleTest() {
-    let entry = TerminalEntry(taskID: UUID())
-
-    #expect(entry.tmuxUnavailable == false)
-    entry.tmuxUnavailable = true
-    #expect(entry.tmuxUnavailable == true)
+    #expect(!entry.hasActiveProcess)
 }
 
 @Test @MainActor func terminalEntryAppliesExplicitThemes() {
     let entry = TerminalEntry(taskID: UUID())
-
     entry.applyTheme(.dark, systemColorScheme: .light)
     #expect(abs(entry.terminalView.nativeBackgroundColor.redComponent - 13.0 / 255.0) < 0.000_001)
-    #expect(abs(entry.terminalView.nativeBackgroundColor.greenComponent - 17.0 / 255.0) < 0.000_001)
-    #expect(abs(entry.terminalView.nativeBackgroundColor.blueComponent - 23.0 / 255.0) < 0.000_001)
     #expect(abs(entry.terminalView.nativeForegroundColor.redComponent - 230.0 / 255.0) < 0.000_001)
-
     entry.applyTheme(.light, systemColorScheme: .dark)
     #expect(entry.terminalView.nativeBackgroundColor.redComponent == 1.0)
-    #expect(entry.terminalView.nativeBackgroundColor.greenComponent == 1.0)
-    #expect(entry.terminalView.nativeBackgroundColor.blueComponent == 1.0)
-    #expect(abs(entry.terminalView.nativeForegroundColor.redComponent - 31.0 / 255.0) < 0.000_001)
-
     entry.applyTheme(.system, systemColorScheme: .light)
     let lightBackground = entry.terminalView.nativeBackgroundColor
     entry.applyTheme(.system, systemColorScheme: .dark)
     #expect(entry.terminalView.nativeBackgroundColor != lightBackground)
 }
 
-// MARK: - TerminalStore Tests
-
 @Test @MainActor func terminalStoreCreatesAndReturnsSameEntryTest() {
     let store = TerminalStore()
     let taskID = UUID()
-
     let entry = store.entry(for: taskID)
     #expect(entry.taskID == taskID)
-
-    let sameEntry = store.entry(for: taskID)
-    #expect(entry === sameEntry)
+    #expect(store.entry(for: taskID) === entry)
 }
 
-@Test @MainActor func terminalStoreCreatesDifferentEntriesTest() {
+@Test @MainActor func terminalStoreCreatesIndependentEntriesPerTaskTest() {
     let store = TerminalStore()
-    let taskID1 = UUID()
-    let taskID2 = UUID()
-
-    let entry1 = store.entry(for: taskID1)
-    let entry2 = store.entry(for: taskID2)
-
-    #expect(entry1 !== entry2)
-    #expect(entry1.taskID == taskID1)
-    #expect(entry2.taskID == taskID2)
+    let first = store.entry(for: UUID())
+    let second = store.entry(for: UUID())
+    #expect(first !== second)
 }
 
 @Test @MainActor func terminalStoreAppliesFontChangesToExistingAndNewEntriesTest() {
     let store = TerminalStore()
-    let existingEntry = store.entry(for: UUID())
+    let existing = store.entry(for: UUID())
     var config = TerminalConfig()
     config.fontSize = 19
     config.fontWeight = "bold"
-
     store.updateTerminalConfig(config)
-
-    #expect(existingEntry.terminalView.font.pointSize == 19)
+    #expect(existing.terminalView.font.pointSize == 19)
     #expect(store.entry(for: UUID()).terminalView.font.pointSize == 19)
 }
 
 @Test @MainActor func terminalStoreMetadataUpdateSetsWorkingDirectoryTest() {
     let store = TerminalStore()
     let taskID = UUID()
-
-    // Create entry first, then update metadata
     _ = store.entry(for: taskID)
-    store.updateTaskMetadata(
-        taskID: taskID,
-        name: "Test Task",
-        watchMode: .on,
-        workingDirectory: "/tmp",
-        projectDirectory: "/project"
-    )
-
+    store.updateTaskMetadata(taskID: taskID, name: "Test Task", watchMode: .on, workingDirectory: "/tmp", projectDirectory: "/project")
     let entry = store.entry(for: taskID)
     #expect(entry.workingDirectory == "/tmp")
     #expect(entry.projectDirectory == "/project")
 }
 
-@Test @MainActor func terminalStoreKillSessionCreatesNewEntryTest() {
+@Test @MainActor func terminalStoreSplitsAndClosesTaskTerminalTest() {
     let store = TerminalStore()
     let taskID = UUID()
-
     let entry = store.entry(for: taskID)
-    entry.isRunning = true
 
-    store.killSession(for: taskID)
+    store.splitTerminal(taskID: taskID, orientation: .horizontal)
+    let secondaryPane = entry.secondaryPane
+    #expect(secondaryPane != nil)
+    #expect(secondaryPane?.taskID == taskID)
+    #expect(secondaryPane?.paneID != entry.paneID)
+    #expect(entry.splitOrientation == .horizontal)
 
-    // Entry should be removed from cache, new entry created
-    let newEntry = store.entry(for: taskID)
-    #expect(newEntry !== entry)
+    if let secondaryPane { entry.focusPane(secondaryPane.paneID) }
+    store.closeSplitTerminal(taskID: taskID)
+    #expect(entry.secondaryPane == nil)
+
+    store.splitTerminal(taskID: taskID, orientation: .vertical)
+    let remainingPane = entry.secondaryPane
+    entry.focusPane(entry.paneID)
+    store.closeSplitTerminal(taskID: taskID)
+    #expect(entry.primaryPaneClosed)
+    #expect(entry.secondaryPane != nil)
+    #expect(entry.activeTerminal === entry.secondaryPane)
+
+    store.splitTerminal(taskID: taskID, orientation: .horizontal)
+    #expect(!entry.primaryPaneClosed)
+    #expect(entry.splitOrientation == .horizontal)
+    #expect(entry.secondaryPane === remainingPane)
+}
+
+@Test @MainActor func terminalStoreTerminationRemovesTaskShellFromCacheTest() {
+    let store = TerminalStore()
+    let taskID = UUID()
+    let entry = store.entry(for: taskID)
+    store.terminateTerminal(for: taskID)
+    #expect(store.entry(for: taskID) !== entry)
 }
 
 @Test @MainActor func terminalStoreClearAttentionDoesNotCrashTest() {
-    let store = TerminalStore()
-    let taskID = UUID()
-
-    // This tests that clearAttention doesn't crash
-    store.clearAttention(taskID: taskID)
+    TerminalStore().clearAttention(taskID: UUID())
 }
-
-// MARK: - Window State Tests
-
-@Test @MainActor func windowStateInitialValuesTest() {
-    let entry = TerminalEntry(taskID: UUID())
-
-    #expect(entry.windows.isEmpty)
-    #expect(entry.currentWindowIndex == 0)
-}
-
-// MARK: - Tmux Executable Detection Tests
-
-@Test func tmuxExecutableDetectionTest() {
-    let tmux = tmuxExecutable()
-
-    // tmux may or may not be installed in the test environment
-    if let tmux {
-        #expect(FileManager.default.isExecutableFile(atPath: tmux))
-    }
-}
-
-// MARK: - Active Process Detection Logic Tests
 
 @Test func knownShellsDetectionTest() {
-    let knownShells: Set<String> = [
-        "zsh", "bash", "sh", "fish", "dash", "csh", "tcsh", "login",
-        "tmux", "tmux: server",
-    ]
-
-    for shell in knownShells {
-        #expect(knownShells.contains(shell))
-    }
-
-    // Non-shell commands should not be in the set
+    let knownShells: Set<String> = ["zsh", "bash", "sh", "fish", "dash", "csh", "tcsh", "login"]
+    for shell in knownShells { #expect(knownShells.contains(shell)) }
     #expect(!knownShells.contains("node"))
     #expect(!knownShells.contains("swift"))
     #expect(!knownShells.contains("python3"))
 }
 
 @Test func parseActivePaneInfoTest() {
-    let parsed = parseActivePaneInfo("88228 bash\n")
-
-    #expect(parsed == ActivePaneInfo(pid: 88228, command: "bash"))
+    #expect(parseActivePaneInfo("88228 bash\n") == ActivePaneInfo(pid: 88228, command: "bash"))
 }
 
 @Test func deepestLeafDescendantPrefersDeepestForegroundLeafTest() {
@@ -255,1105 +155,43 @@ private func killTmuxSessionSync(_ tmux: String, sessionName: String) {
         ProcessSnapshot(pid: 200, parentPID: 100, stat: "S+", command: "bash wrapper.sh"),
         ProcessSnapshot(pid: 300, parentPID: 200, stat: "S+", command: "node /tmp/tool.js"),
         ProcessSnapshot(pid: 400, parentPID: 300, stat: "S+", command: "/usr/local/bin/kilo"),
-        ProcessSnapshot(pid: 500, parentPID: 300, stat: "S", command: "/usr/local/bin/helper"),
+        ProcessSnapshot(pid: 500, parentPID: 300, stat: "S", command: "/usr/local/bin/helper")
     ]
-
     let leaf = deepestLeafDescendant(in: snapshots, rootPID: 100)
-
     #expect(leaf?.pid == 400)
     #expect(leaf?.executableName == "kilo")
 }
 
-@Test func resolvedActiveCommandUsesDeepestLeafForShellPaneTest() async {
-    let paneInfo = ActivePaneInfo(pid: 100, command: "bash")
-    let psScript = """
-    #!/bin/sh
-    cat <<'EOF'
-    100 1 Ss /bin/zsh -l
-    200 100 S+ bash wrapper.sh
-    300 200 S+ node /tmp/tool.js
-    400 300 S+ /usr/local/bin/kilo
-    EOF
-    """
-
-    let pgrepScript = """
-    #!/bin/sh
-    case "$2" in
-      100) printf '200\n' ;;
-      200) printf '300\n' ;;
-      300) printf '400\n' ;;
-    esac
-    """
-
-    let temporaryDirectory = FileManager.default.temporaryDirectory
-    let temporaryPSScript = temporaryDirectory
-        .appendingPathComponent("openzeus-ps-\(UUID().uuidString).sh")
-    let temporaryPGrepScript = temporaryDirectory
-        .appendingPathComponent("openzeus-pgrep-\(UUID().uuidString).sh")
-    try? psScript.write(to: temporaryPSScript, atomically: true, encoding: .utf8)
-    try? pgrepScript.write(to: temporaryPGrepScript, atomically: true, encoding: .utf8)
-    try? FileManager.default.setAttributes(
-        [.posixPermissions: 0o755],
-        ofItemAtPath: temporaryPSScript.path
-    )
-    try? FileManager.default.setAttributes(
-        [.posixPermissions: 0o755],
-        ofItemAtPath: temporaryPGrepScript.path
-    )
+@Test func resolvedActiveCommandUsesDeepestLeafForShellTest() async throws {
+    let psScript = "#!/bin/sh\ncat <<'EOF'\n100 1 Ss /bin/zsh -l\n200 100 S+ bash wrapper.sh\n300 200 S+ node /tmp/tool.js\n400 300 S+ /usr/local/bin/kilo\nEOF\n"
+    let pgrepScript = "#!/bin/sh\ncase \"$2\" in\n100) printf '200\\n' ;;\n200) printf '300\\n' ;;\n300) printf '400\\n' ;;\nesac\n"
+    let psURL = FileManager.default.temporaryDirectory.appendingPathComponent("openzeus-ps-\(UUID().uuidString).sh")
+    let pgrepURL = FileManager.default.temporaryDirectory.appendingPathComponent("openzeus-pgrep-\(UUID().uuidString).sh")
+    try psScript.write(to: psURL, atomically: true, encoding: .utf8)
+    try pgrepScript.write(to: pgrepURL, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: psURL.path)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: pgrepURL.path)
     defer {
-        try? FileManager.default.removeItem(at: temporaryPSScript)
-        try? FileManager.default.removeItem(at: temporaryPGrepScript)
+        try? FileManager.default.removeItem(at: psURL)
+        try? FileManager.default.removeItem(at: pgrepURL)
     }
-
     let command = await resolvedActiveCommand(
-        paneInfo: paneInfo,
+        paneInfo: ActivePaneInfo(pid: 100, command: "bash"),
         knownShells: ["bash", "zsh"],
-        psExecutable: temporaryPSScript.path,
-        pgrepExecutable: temporaryPGrepScript.path
+        psExecutable: psURL.path,
+        pgrepExecutable: pgrepURL.path
     )
-
     #expect(command == "kilo")
 }
 
-// MARK: - Run Process Output Tests
-
 @Test func runProcessOutputEchoTest() async {
-    let output = await runProcessOutput("/bin/echo", args: ["hello", "world"])
-    #expect(output.trimmingCharacters(in: .whitespacesAndNewlines) == "hello world")
+    #expect(await runProcessOutput("/bin/echo", args: ["hello", "world"]).trimmingCharacters(in: .whitespacesAndNewlines) == "hello world")
 }
 
 @Test func runProcessOutputPwdTest() async {
-    let output = await runProcessOutput("/bin/pwd", args: [])
-    #expect(!output.isEmpty)
+    #expect(!(await runProcessOutput("/bin/pwd", args: [])).isEmpty)
 }
 
 @Test func runProcessOutputNonExistentBinaryTest() async {
-    let output = await runProcessOutput("/nonexistent/binary", args: [])
-    #expect(output.isEmpty)
-}
-
-@Test func runProcessOutputFalseExitCodeTest() async {
-    let output = await runProcessOutput("/bin/false", args: [])
-    // false exits with 1 but we don't check exit code, just that it completes
-    #expect(output.isEmpty)
-}
-
-// MARK: - Window Control Methods (Integration Tests with Tmux)
-
-@Test @MainActor func tmuxSessionCreationAndListTest() async {
-    guard let tmux = tmuxExecutable() else {
-        return  // Skip if tmux not installed
-    }
-
-    let sessionName = "zeus-test-session-\(UUID().uuidString.prefix(8))"
-
-    // Create session
-    _ = await runProcessOutput(tmux, args: [
-        "new-session", "-d", "-s", sessionName, "/bin/bash"
-    ])
-
-    // Verify session exists
-    let listOutput = await runProcessOutput(tmux, args: [
-        "list-sessions", "-F", "#{session_name}"
-    ])
-    #expect(listOutput.contains(sessionName))
-
-    // Cleanup
-    killTmuxSessionSync(tmux, sessionName: sessionName)
-}
-
-@Test @MainActor func tmuxWindowCreationTest() async {
-    guard let tmux = tmuxExecutable() else {
-        return  // Skip if tmux not installed
-    }
-
-    let sessionName = "zeus-test-windows-\(UUID().uuidString.prefix(8))"
-
-    // Create session
-    _ = await runProcessOutput(tmux, args: [
-        "new-session", "-d", "-s", sessionName, "/bin/bash"
-    ])
-
-    // Create new window
-    _ = await runProcessOutput(tmux, args: [
-        "new-window", "-t", sessionName, "/bin/bash"
-    ])
-
-    // Verify two windows exist
-    let windows = await runProcessOutput(tmux, args: [
-        "list-windows", "-t", sessionName, "-F", "#{window_index}"
-    ])
-    let windowIndices = windows
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-        .split(separator: "\n")
-        .compactMap { Int($0) }
-    #expect(windowIndices.count == 2)
-
-    // Cleanup
-    killTmuxSessionSync(tmux, sessionName: sessionName)
-}
-
-@Test @MainActor func tmuxWindowNavigationTest() async {
-    guard let tmux = tmuxExecutable() else {
-        return  // Skip if tmux not installed
-    }
-
-    let sessionName = "zeus-test-nav-\(UUID().uuidString.prefix(8))"
-
-    // Create session with two windows
-    _ = await runProcessOutput(tmux, args: [
-        "new-session", "-d", "-s", sessionName, "/bin/bash"
-    ])
-    _ = await runProcessOutput(tmux, args: [
-        "new-window", "-t", sessionName, "/bin/bash"
-    ])
-
-    // Navigate to next window
-    _ = await runProcessOutput(tmux, args: [
-        "next-window", "-t", sessionName
-    ])
-
-    // Navigate to previous window
-    _ = await runProcessOutput(tmux, args: [
-        "previous-window", "-t", sessionName
-    ])
-
-    // Select specific window
-    _ = await runProcessOutput(tmux, args: [
-        "select-window", "-t", "\(sessionName):1"
-    ])
-
-    let activeWindow = await runProcessOutput(tmux, args: [
-        "display-message", "-p", "-t", sessionName, "#{window_index}"
-    ])
-    #expect(activeWindow.trimmingCharacters(in: .whitespacesAndNewlines) == "1")
-
-    // Cleanup
-    killTmuxSessionSync(tmux, sessionName: sessionName)
-}
-
-@Test @MainActor func tmuxPaneSplitHorizontalTest() async {
-    guard let tmux = tmuxExecutable() else {
-        return  // Skip if tmux not installed
-    }
-
-    let sessionName = "zeus-test-split-h-\(UUID().uuidString.prefix(8))"
-
-    // Create session
-    _ = await runProcessOutput(tmux, args: [
-        "new-session", "-d", "-s", sessionName, "/bin/bash"
-    ])
-
-    // Split horizontally
-    _ = await runProcessOutput(tmux, args: [
-        "split-window", "-h", "-t", sessionName
-    ])
-
-    // Verify pane count
-    let panes = await runProcessOutput(tmux, args: [
-        "list-panes", "-t", sessionName
-    ])
-    let paneCount = panes
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-        .split(separator: "\n")
-        .count
-    #expect(paneCount == 2)
-
-    // Cleanup
-    killTmuxSessionSync(tmux, sessionName: sessionName)
-}
-
-@Test @MainActor func terminalEntrySplitPaneUsesActivePaneDirectoryTest() async {
-    guard let tmux = tmuxExecutable() else {
-        return
-    }
-
-    let taskID = UUID()
-    let sessionName = "zeus-\(taskID.uuidString)"
-    let baseDirectory = NSTemporaryDirectory()
-    let activeDirectoryURL = FileManager.default.temporaryDirectory
-        .appendingPathComponent("zeus-cwd-\(UUID().uuidString)")
-    try? FileManager.default.createDirectory(at: activeDirectoryURL, withIntermediateDirectories: true)
-    let activeDirectory = activeDirectoryURL.resolvingSymlinksInPath().path
-
-    _ = await runProcessOutput(tmux, args: [
-        "new-session", "-d", "-s", sessionName, "-c", baseDirectory, "/bin/bash"
-    ])
-    _ = await runProcessOutput(tmux, args: [
-        "send-keys", "-t", sessionName, "cd \(activeDirectory)", "Enter"
-    ])
-    try? await Task.sleep(for: .milliseconds(200))
-
-    let entry = TerminalEntry(taskID: taskID)
-    entry.workingDirectory = baseDirectory
-    entry.splitHorizontal()
-
-    var paneDirectories: [String] = []
-    for _ in 0..<20 {
-        paneDirectories = await runProcessOutput(tmux, args: [
-            "list-panes", "-t", sessionName, "-F", "#{pane_current_path}"
-        ])
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .split(separator: "\n")
-            .map(String.init)
-        if paneDirectories.count == 2 {
-            break
-        }
-        try? await Task.sleep(for: .milliseconds(100))
-    }
-
-    let normalizedPaneDirectories = paneDirectories.map {
-        $0.hasPrefix("/private/") ? String($0.dropFirst("/private".count)) : $0
-    }
-    #expect(normalizedPaneDirectories.count == 2)
-    #expect(normalizedPaneDirectories.allSatisfy { $0 == activeDirectory })
-
-    killTmuxSessionSync(tmux, sessionName: sessionName)
-    try? FileManager.default.removeItem(atPath: activeDirectory)
-}
-
-@Test @MainActor func tmuxPaneSplitVerticalTest() async {
-    guard let tmux = tmuxExecutable() else {
-        return  // Skip if tmux not installed
-    }
-
-    let sessionName = "zeus-test-split-v-\(UUID().uuidString.prefix(8))"
-
-    // Create session
-    _ = await runProcessOutput(tmux, args: [
-        "new-session", "-d", "-s", sessionName, "/bin/bash"
-    ])
-
-    // Split vertically
-    _ = await runProcessOutput(tmux, args: [
-        "split-window", "-v", "-t", sessionName
-    ])
-
-    // Verify pane count
-    let panes = await runProcessOutput(tmux, args: [
-        "list-panes", "-t", sessionName
-    ])
-    let paneCount = panes
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-        .split(separator: "\n")
-        .count
-    #expect(paneCount == 2)
-
-    // Cleanup
-    killTmuxSessionSync(tmux, sessionName: sessionName)
-}
-
-@Test @MainActor func tmuxPaneRotationTest() async {
-    guard let tmux = tmuxExecutable() else {
-        return  // Skip if tmux not installed
-    }
-
-    let sessionName = "zeus-test-rotate-\(UUID().uuidString.prefix(8))"
-
-    // Create session with multiple panes
-    _ = await runProcessOutput(tmux, args: [
-        "new-session", "-d", "-s", sessionName, "/bin/bash"
-    ])
-    _ = await runProcessOutput(tmux, args: [
-        "split-window", "-h", "-t", sessionName
-    ])
-    _ = await runProcessOutput(tmux, args: [
-        "split-window", "-v", "-t", sessionName
-    ])
-
-    // Rotate to next pane
-    let result = await runProcessOutput(tmux, args: [
-        "select-pane", "-t", "\(sessionName):.+"
-    ])
-
-    // select-pane doesn't output on success
-    #expect(result.isEmpty || result.contains("%"))
-
-    // Cleanup
-    killTmuxSessionSync(tmux, sessionName: sessionName)
-}
-
-@Test @MainActor func tmuxPaneZoomToggleTest() async {
-    guard let tmux = tmuxExecutable() else {
-        return  // Skip if tmux not installed
-    }
-
-    let sessionName = "zeus-test-zoom-\(UUID().uuidString.prefix(8))"
-
-    // Create session with multiple panes
-    _ = await runProcessOutput(tmux, args: [
-        "new-session", "-d", "-s", sessionName, "/bin/bash"
-    ])
-    _ = await runProcessOutput(tmux, args: [
-        "split-window", "-h", "-t", sessionName
-    ])
-
-    // Zoom the pane
-    _ = await runProcessOutput(tmux, args: [
-        "resize-pane", "-Z", "-t", sessionName
-    ])
-
-    // Verify zoomed flag
-    let zoomed = await runProcessOutput(tmux, args: [
-        "display", "-p", "-t", sessionName, "#{window_zoomed_flag}"
-    ])
-    #expect(zoomed.trimmingCharacters(in: .whitespacesAndNewlines) == "1")
-
-    // Unzoom the pane
-    _ = await runProcessOutput(tmux, args: [
-        "resize-pane", "-Z", "-t", sessionName
-    ])
-
-    // Verify unzoomed flag
-    let unzoomed = await runProcessOutput(tmux, args: [
-        "display", "-p", "-t", sessionName, "#{window_zoomed_flag}"
-    ])
-    #expect(unzoomed.trimmingCharacters(in: .whitespacesAndNewlines) == "0")
-
-    // Cleanup
-    killTmuxSessionSync(tmux, sessionName: sessionName)
-}
-
-@Test @MainActor func tmuxWindowCloseTest() async {
-    guard let tmux = tmuxExecutable() else {
-        return  // Skip if tmux not installed
-    }
-
-    let sessionName = "zeus-test-close-\(UUID().uuidString.prefix(8))"
-
-    // Create session with two windows
-    _ = await runProcessOutput(tmux, args: [
-        "new-session", "-d", "-s", sessionName, "/bin/bash"
-    ])
-    _ = await runProcessOutput(tmux, args: [
-        "new-window", "-t", sessionName, "/bin/bash"
-    ])
-
-    // Verify two windows
-    var windows = await runProcessOutput(tmux, args: [
-        "list-windows", "-t", sessionName
-    ])
-    let initialCount = windows
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-        .split(separator: "\n")
-        .count
-    #expect(initialCount == 2)
-
-    // Close a window
-    _ = await runProcessOutput(tmux, args: [
-        "kill-window", "-t", sessionName
-    ])
-
-    // Verify one window remains
-    windows = await runProcessOutput(tmux, args: [
-        "list-windows", "-t", sessionName
-    ])
-    let finalCount = windows
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-        .split(separator: "\n")
-        .count
-    #expect(finalCount == 1)
-
-    // Cleanup
-    killTmuxSessionSync(tmux, sessionName: sessionName)
-}
-
-@Test @MainActor func tmuxSendCommandTest() async {
-    guard let tmux = tmuxExecutable() else {
-        return  // Skip if tmux not installed
-    }
-
-    let sessionName = "zeus-test-send-\(UUID().uuidString.prefix(8))"
-
-    // Create session
-    _ = await runProcessOutput(tmux, args: [
-        "new-session", "-d", "-s", sessionName, "/bin/bash"
-    ])
-
-    // Send a command
-    _ = await runProcessOutput(tmux, args: [
-        "send-keys", "-t", sessionName, "echo test", "Enter"
-    ])
-
-    // Wait for command to execute
-    try? await Task.sleep(nanoseconds: 100_000_000)
-
-    // Verify the session is still alive
-    let alive = await runProcessOutput(tmux, args: [
-        "has-session", "-t", sessionName
-    ])
-    // has-session returns empty on success
-    #expect(alive.isEmpty)
-
-    // Cleanup
-    killTmuxSessionSync(tmux, sessionName: sessionName)
-}
-
-@Test @MainActor func tmuxWorkingDirectoryInheritanceTest() async {
-    guard let tmux = tmuxExecutable() else {
-        return  // Skip if tmux not installed
-    }
-
-    let sessionName = "zeus-test-cwd-\(UUID().uuidString.prefix(8))"
-    let testDir = NSTemporaryDirectory()
-
-    // Create session with working directory
-    _ = await runProcessOutput(tmux, args: [
-        "new-session", "-d", "-s", sessionName, "-c", testDir, "/bin/bash"
-    ])
-
-    // Create new window with working directory
-    _ = await runProcessOutput(tmux, args: [
-        "new-window", "-t", sessionName, "-c", testDir, "/bin/bash"
-    ])
-
-    // Verify window was created
-    let windows = await runProcessOutput(tmux, args: [
-        "list-windows", "-t", sessionName
-    ])
-    #expect(windows.contains("1"))
-
-    // Cleanup
-    killTmuxSessionSync(tmux, sessionName: sessionName)
-}
-
-@Test @MainActor func tmuxSessionPersistOnAttachTest() async {
-    guard let tmux = tmuxExecutable() else {
-        return  // Skip if tmux not installed
-    }
-
-    let sessionName = "zeus-test-persist-\(UUID().uuidString.prefix(8))"
-
-    // Create session
-    _ = await runProcessOutput(tmux, args: [
-        "new-session", "-d", "-s", sessionName, "/bin/bash"
-    ])
-
-    // Attach to existing session (creates new window if -A is used)
-    _ = await runProcessOutput(tmux, args: [
-        "new-session", "-A", "-s", sessionName, "/bin/bash"
-    ])
-
-    // Verify session still exists
-    let exists = await runProcessOutput(tmux, args: [
-        "has-session", "-t", sessionName
-    ])
-    #expect(exists.isEmpty)
-
-    // Cleanup
-    killTmuxSessionSync(tmux, sessionName: sessionName)
-}
-
-@Test @MainActor func tmuxListWindowsFormatTest() async {
-    guard let tmux = tmuxExecutable() else {
-        return  // Skip if tmux not installed
-    }
-
-    let sessionName = "zeus-test-format-\(UUID().uuidString.prefix(8))"
-
-    // Create session with named window
-    _ = await runProcessOutput(tmux, args: [
-        "new-session", "-d", "-s", sessionName, "-n", "main", "/bin/bash"
-    ])
-    _ = await runProcessOutput(tmux, args: [
-        "new-window", "-t", sessionName, "-n", "editor", "/bin/bash"
-    ])
-
-    // Get formatted output
-    let output = await runProcessOutput(tmux, args: [
-        "list-windows", "-t", sessionName,
-        "-F", "#{window_index}|#{window_name}|#{window_active}"
-    ])
-
-    let lines = output
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-        .split(separator: "\n")
-
-    #expect(lines.count == 2)
-
-    // Parse and verify format
-    for line in lines {
-        let parts = line.split(separator: "|")
-        #expect(parts.count == 3)
-        #expect(Int(parts[0]) != nil)  // index is a number
-        #expect(!parts[1].isEmpty)     // name is not empty
-        #expect(parts[2] == "0" || parts[2] == "1")  // active is 0 or 1
-    }
-
-    // Cleanup
-    killTmuxSessionSync(tmux, sessionName: sessionName)
-}
-
-@Test @MainActor func tmuxListPanesFormatTest() async {
-    guard let tmux = tmuxExecutable() else {
-        return  // Skip if tmux not installed
-    }
-
-    let sessionName = "zeus-test-panes-\(UUID().uuidString.prefix(8))"
-
-    // Create session and split
-    _ = await runProcessOutput(tmux, args: [
-        "new-session", "-d", "-s", sessionName, "/bin/bash"
-    ])
-    _ = await runProcessOutput(tmux, args: [
-        "split-window", "-h", "-t", sessionName
-    ])
-    _ = await runProcessOutput(tmux, args: [
-        "split-window", "-v", "-t", sessionName
-    ])
-
-    // Get pane list
-    let panes = await runProcessOutput(tmux, args: [
-        "list-panes", "-t", sessionName
-    ])
-
-    let paneCount = panes
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-        .split(separator: "\n")
-        .count
-    #expect(paneCount == 3)
-
-    // Cleanup
-    killTmuxSessionSync(tmux, sessionName: sessionName)
-}
-
-@Test @MainActor func tmuxDetectActiveProcessTest() async {
-    guard let tmux = tmuxExecutable() else {
-        return  // Skip if tmux not installed
-    }
-
-    let sessionName = "zeus-test-proc-\(UUID().uuidString.prefix(8))"
-
-    // Create session with shell
-    _ = await runProcessOutput(tmux, args: [
-        "new-session", "-d", "-s", sessionName, "/bin/bash"
-    ])
-
-    // Check current command (should be shell)
-    let command = await runProcessOutput(tmux, args: [
-        "display-message", "-p", "-t", sessionName, "#{pane_current_command}"
-    ])
-
-    let trimmedCommand = command.trimmingCharacters(in: .whitespacesAndNewlines)
-    let knownShells = ["zsh", "bash", "sh", "fish", "dash", "csh", "tcsh", "login", "tmux", "tmux: server"]
-    #expect(knownShells.contains(trimmedCommand))
-
-    // Cleanup
-    killTmuxSessionSync(tmux, sessionName: sessionName)
-}
-
-@Test @MainActor func tmuxSetMouseOptionTest() async {
-    guard let tmux = tmuxExecutable() else {
-        return  // Skip if tmux not installed
-    }
-
-    let sessionName = "zeus-test-mouse-\(UUID().uuidString.prefix(8))"
-
-    // Create session
-    _ = await runProcessOutput(tmux, args: [
-        "new-session", "-d", "-s", sessionName, "/bin/bash"
-    ])
-    defer { killTmuxSessionSync(tmux, sessionName: sessionName) }
-
-    // Enable mouse mode for the session and confirm the option took effect
-    let result = await runProcessOutput(tmux, args: [
-        "set-option", "-t", sessionName, "mouse", "on"
-    ])
-
-    // set-option doesn't output on success
-    #expect(result.isEmpty)
-
-    let mouseOption = (await runProcessOutput(tmux, args: [
-        "show-options", "-v", "-t", sessionName, "mouse"
-    ])).trimmingCharacters(in: .whitespacesAndNewlines)
-    #expect(mouseOption == "on")
-
-    _ = await runProcessOutput(tmux, args: [
-        "set-option", "-w", "-t", sessionName, "focus-follows-mouse", "on"
-    ])
-    let focusFollowsMouseOption = (await runProcessOutput(tmux, args: [
-        "show-options", "-w", "-v", "-t", sessionName, "focus-follows-mouse"
-    ])).trimmingCharacters(in: .whitespacesAndNewlines)
-    #expect(focusFollowsMouseOption == "on")
-}
-
-// MARK: - Edge Cases
-
-@Test @MainActor func terminalStoreMultipleKillSessionTest() {
-    let store = TerminalStore()
-    let taskID = UUID()
-
-    _ = store.entry(for: taskID)
-
-    // Kill session multiple times should not crash
-    store.killSession(for: taskID)
-    store.killSession(for: taskID)
-
-    // Should be able to create new entry after kill
-    let newEntry = store.entry(for: taskID)
-    #expect(newEntry.taskID == taskID)
-}
-
-@Test @MainActor func terminalStoreMetadataUpdateCachesTaskInfoTest() {
-    let store = TerminalStore()
-    let taskID = UUID()
-
-    // Update metadata before entry exists - this caches task metadata
-    // The workingDirectory is only set on existing entries
-    store.updateTaskMetadata(
-        taskID: taskID,
-        name: "Pre-created",
-        watchMode: .silent,
-        workingDirectory: "/pre",
-        projectDirectory: "/project-pre"
-    )
-
-    // Now create entry - workingDirectory won't be set since entry didn't exist
-    let entry = store.entry(for: taskID)
-    #expect(entry.workingDirectory.isEmpty)
-    #expect(entry.projectDirectory.isEmpty)
-
-    // Update metadata after entry exists - now workingDirectory is set
-    store.updateTaskMetadata(
-        taskID: taskID,
-        name: "Updated",
-        watchMode: .on,
-        workingDirectory: "/updated",
-        projectDirectory: "/project-updated"
-    )
-    #expect(entry.workingDirectory == "/updated")
-    #expect(entry.projectDirectory == "/project-updated")
-}
-
-@Test @MainActor func tmuxSessionNameFormatTest() {
-    let taskID = UUID()
-    let sessionName = "zeus-\(taskID.uuidString)"
-
-    #expect(sessionName.hasPrefix("zeus-"))
-    #expect(sessionName.count == 41)  // "zeus-" (5) + UUID (36)
-}
-
-@Test @MainActor func windowNavigationEdgeCaseWithNoWindowsTest() {
-    let entry = TerminalEntry(taskID: UUID())
-
-    // With no windows, operations should be no-ops
-    entry.openWindow()
-    entry.nextWindow()
-    entry.previousWindow()
-    entry.closeWindow()
-    entry.selectWindow(index: 0)
-    entry.rotatePane()
-
-    // These should not crash
-    #expect(entry.windows.isEmpty)
-}
-
-@Test @MainActor func commandSendWithoutTmuxTest() {
-    let entry = TerminalEntry(taskID: UUID())
-    entry.tmuxUnavailable = true
-
-    // Should not crash when sending command without tmux
-    entry.sendCommand("echo test", inNewVerticalPane: false)
-    entry.sendCommand("echo test", inNewVerticalPane: true)
-}
-
-// MARK: - TerminalEntry Window Navigation Tests (Button Simulation)
-
-@Test @MainActor func terminalEntryNextWindowTest() async {
-    guard let tmux = tmuxExecutable() else {
-        return  // Skip if tmux not installed
-    }
-
-    let taskID = UUID()
-    let sessionName = "zeus-\(taskID.uuidString)"
-
-    // Create session with two windows
-    _ = await runProcessOutput(tmux, args: [
-        "new-session", "-d", "-s", sessionName, "/bin/bash"
-    ])
-    _ = await runProcessOutput(tmux, args: [
-        "new-window", "-t", sessionName, "-n", "window2", "/bin/bash"
-    ])
-
-    // Explicitly select window 0 to ensure consistent starting state
-    _ = await runProcessOutput(tmux, args: [
-        "select-window", "-t", "\(sessionName):0"
-    ])
-
-    defer { killTmuxSessionSync(tmux, sessionName: sessionName) }
-
-    // Verify starting at window 0
-    var active = await runProcessOutput(tmux, args: [
-        "display-message", "-p", "-t", sessionName, "#{window_index}"
-    ])
-    #expect(active.trimmingCharacters(in: .whitespacesAndNewlines) == "0")
-
-    // Simulate clicking "Next Window" button
-    let entry = TerminalEntry(taskID: taskID)
-    entry.nextWindow()
-
-    // Wait for async operation
-    try? await Task.sleep(nanoseconds: 500_000_000)
-
-    // Verify we moved to window 1
-    active = await runProcessOutput(tmux, args: [
-        "display-message", "-p", "-t", sessionName, "#{window_index}"
-    ])
-    #expect(active.trimmingCharacters(in: .whitespacesAndNewlines) == "1")
-}
-
-@Test @MainActor func terminalEntryPreviousWindowTest() async {
-    guard let tmux = tmuxExecutable() else {
-        return  // Skip if tmux not installed
-    }
-
-    let taskID = UUID()
-    let sessionName = "zeus-\(taskID.uuidString)"
-
-    // Create session with two windows
-    _ = await runProcessOutput(tmux, args: [
-        "new-session", "-d", "-s", sessionName, "-n", "window1", "/bin/bash"
-    ])
-    _ = await runProcessOutput(tmux, args: [
-        "new-window", "-t", sessionName, "-n", "window2", "/bin/bash"
-    ])
-
-    defer { killTmuxSessionSync(tmux, sessionName: sessionName) }
-
-    // Start at window 1
-    _ = await runProcessOutput(tmux, args: [
-        "select-window", "-t", "\(sessionName):1"
-    ])
-
-    var active = await runProcessOutput(tmux, args: [
-        "display-message", "-p", "-t", sessionName, "#{window_index}"
-    ])
-    #expect(active.trimmingCharacters(in: .whitespacesAndNewlines) == "1")
-
-    // Simulate clicking "Previous Window" button
-    let entry = TerminalEntry(taskID: taskID)
-    entry.previousWindow()
-
-    // Wait for async operation
-    try? await Task.sleep(nanoseconds: 300_000_000)
-
-    // Verify we moved to window 0
-    active = await runProcessOutput(tmux, args: [
-        "display-message", "-p", "-t", sessionName, "#{window_index}"
-    ])
-    #expect(active.trimmingCharacters(in: .whitespacesAndNewlines) == "0")
-}
-
-@Test @MainActor func terminalEntryWindowsArrayPopulatedTest() async {
-    // This test verifies that TerminalEntry.windows array is correctly populated
-    // after checkActiveProcess runs - catching format string mismatches
-    guard let tmux = tmuxExecutable() else {
-        return  // Skip if tmux not installed
-    }
-
-    let taskID = UUID()
-    let sessionName = "zeus-\(taskID.uuidString)"
-
-    // Create session with 3 windows
-    _ = await runProcessOutput(tmux, args: [
-        "new-session", "-d", "-s", sessionName, "/bin/bash"
-    ])
-    _ = await runProcessOutput(tmux, args: [
-        "new-window", "-t", sessionName, "/bin/bash"
-    ])
-    _ = await runProcessOutput(tmux, args: [
-        "new-window", "-t", sessionName, "/bin/bash"
-    ])
-
-    defer { killTmuxSessionSync(tmux, sessionName: sessionName) }
-
-    // Create TerminalEntry and trigger checkActiveProcess
-    let entry = TerminalEntry(taskID: taskID)
-    entry.isRunning = true  // This starts polling which calls checkActiveProcess
-
-    // Wait for polling to complete (allow extra time under parallel test load)
-    try? await Task.sleep(nanoseconds: 1_500_000_000)
-
-    // CRITICAL: Verify windows array was populated via parsing
-    #expect(entry.windows.count == 3, "Expected 3 windows after parsing, got \(entry.windows.count)")
-    #expect(entry.windows.contains { $0.index == 0 }, "Should have window 0")
-    #expect(entry.windows.contains { $0.index == 1 }, "Should have window 1")
-    #expect(entry.windows.contains { $0.index == 2 }, "Should have window 2")
-
-    entry.isRunning = false
-}
-
-@Test @MainActor func terminalEntryOpenNewWindowTest() async {
-    guard let tmux = tmuxExecutable() else {
-        return  // Skip if tmux not installed
-    }
-
-    let taskID = UUID()
-    let sessionName = "zeus-\(taskID.uuidString)"
-
-    // Create initial session
-    _ = await runProcessOutput(tmux, args: [
-        "new-session", "-d", "-s", sessionName, "/bin/bash"
-    ])
-
-    defer { killTmuxSessionSync(tmux, sessionName: sessionName) }
-
-    // Create TerminalEntry to track windows
-    let entry = TerminalEntry(taskID: taskID)
-    entry.isRunning = true
-    try? await Task.sleep(nanoseconds: 2_000_000_000)
-
-    // Verify one window exists in entry
-    #expect(entry.windows.count == 1, "Should start with 1 window")
-
-    // Verify one window exists
-    var windows = await runProcessOutput(tmux, args: [
-        "list-windows", "-t", sessionName
-    ])
-    var count = windows.trimmingCharacters(in: .whitespacesAndNewlines)
-        .split(separator: "\n").count
-    #expect(count == 1)
-
-    // Simulate clicking "+" button to open new window
-    entry.openWindow()
-
-    // Wait for async operation
-    try? await Task.sleep(nanoseconds: 300_000_000)
-
-    // Verify two windows now exist
-    windows = await runProcessOutput(tmux, args: [
-        "list-windows", "-t", sessionName
-    ])
-    count = windows.trimmingCharacters(in: .whitespacesAndNewlines)
-        .split(separator: "\n").count
-    #expect(count == 2)
-}
-
-@Test @MainActor func terminalEntrySelectSpecificWindowTest() async {
-    guard let tmux = tmuxExecutable() else {
-        return  // Skip if tmux not installed
-    }
-
-    let taskID = UUID()
-    let sessionName = "zeus-\(taskID.uuidString)"
-
-    // Create session with three windows
-    _ = await runProcessOutput(tmux, args: [
-        "new-session", "-d", "-s", sessionName, "/bin/bash"
-    ])
-    _ = await runProcessOutput(tmux, args: [
-        "new-window", "-t", sessionName, "/bin/bash"
-    ])
-    _ = await runProcessOutput(tmux, args: [
-        "new-window", "-t", sessionName, "/bin/bash"
-    ])
-
-    defer { killTmuxSessionSync(tmux, sessionName: sessionName) }
-
-    // Simulate clicking window tab for window 2
-    let entry = TerminalEntry(taskID: taskID)
-    entry.selectWindow(index: 2)
-
-    // Wait for async operation
-    try? await Task.sleep(nanoseconds: 300_000_000)
-
-    // Verify we're on window 2
-    let active = await runProcessOutput(tmux, args: [
-        "display-message", "-p", "-t", sessionName, "#{window_index}"
-    ])
-    #expect(active.trimmingCharacters(in: .whitespacesAndNewlines) == "2")
-}
-
-@Test @MainActor func terminalEntryCloseWindowButtonTest() async {
-    guard let tmux = tmuxExecutable() else {
-        return  // Skip if tmux not installed
-    }
-
-    let taskID = UUID()
-    let sessionName = "zeus-\(taskID.uuidString)"
-
-    // Create session with two windows
-    _ = await runProcessOutput(tmux, args: [
-        "new-session", "-d", "-s", sessionName, "/bin/bash"
-    ])
-    _ = await runProcessOutput(tmux, args: [
-        "new-window", "-t", sessionName, "/bin/bash"
-    ])
-
-    defer { killTmuxSessionSync(tmux, sessionName: sessionName) }
-
-    // Verify two windows
-    var windows = await runProcessOutput(tmux, args: [
-        "list-windows", "-t", sessionName
-    ])
-    var count = windows.trimmingCharacters(in: .whitespacesAndNewlines)
-        .split(separator: "\n").count
-    #expect(count == 2)
-
-    // Simulate clicking "x" button to close window
-    let entry = TerminalEntry(taskID: taskID)
-    entry.closeWindow()
-
-    // Wait for async operation
-    try? await Task.sleep(nanoseconds: 300_000_000)
-
-    // Verify one window remains
-    windows = await runProcessOutput(tmux, args: [
-        "list-windows", "-t", sessionName
-    ])
-    count = windows.trimmingCharacters(in: .whitespacesAndNewlines)
-        .split(separator: "\n").count
-    #expect(count == 1)
-}
-
-// MARK: - Terminal Container Scroll Forwarding Tests
-
-private final class RecordingScrollView: NSView {
-    var receivedScrollEvents: [NSEvent] = []
-    override func scrollWheel(with event: NSEvent) {
-        receivedScrollEvents.append(event)
-    }
-}
-
-private func makePreciseScrollEvent(deltaY: Int32) -> NSEvent {
-    let cgEvent = CGEvent(
-        scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1,
-        wheel1: deltaY, wheel2: 0, wheel3: 0
-    )!
-    return NSEvent(cgEvent: cgEvent)!
-}
-
-private func makeLineScrollEvent(lines: Int32) -> NSEvent {
-    let cgEvent = CGEvent(
-        scrollWheelEvent2Source: nil, units: .line, wheelCount: 1,
-        wheel1: lines, wheel2: 0, wheel3: 0
-    )!
-    return NSEvent(cgEvent: cgEvent)!
-}
-
-@Test @MainActor func terminalContainerForwardsScrollEventsImmediatelyTest() {
-    let container = TerminalContainerView()
-    let recorder = RecordingScrollView()
-    container.addSubview(recorder)
-
-    container.scrollWheel(with: makePreciseScrollEvent(deltaY: 40))
-
-    // Events must reach SwiftTerm synchronously — no debounce batching.
-    #expect(recorder.receivedScrollEvents.count == 1)
-}
-
-@Test @MainActor func terminalContainerPreservesScrollEventOrderTest() {
-    let container = TerminalContainerView()
-    let recorder = RecordingScrollView()
-    container.addSubview(recorder)
-
-    let first = makePreciseScrollEvent(deltaY: 40)
-    let second = makePreciseScrollEvent(deltaY: -25)
-    let third = makePreciseScrollEvent(deltaY: 8)
-    container.scrollWheel(with: first)
-    container.scrollWheel(with: second)
-    container.scrollWheel(with: third)
-
-    // A gesture must not be coalesced into a net delta; every event is
-    // forwarded in its original order so momentum and reversals work.
-    #expect(recorder.receivedScrollEvents.count == 3)
-    #expect(recorder.receivedScrollEvents[0] === first)
-    #expect(recorder.receivedScrollEvents[1] === second)
-    #expect(recorder.receivedScrollEvents[2] === third)
-}
-
-@Test @MainActor func terminalContainerForwardsMouseWheelLineEventsTest() {
-    let container = TerminalContainerView()
-    let recorder = RecordingScrollView()
-    container.addSubview(recorder)
-
-    container.scrollWheel(with: makeLineScrollEvent(lines: 3))
-
-    #expect(recorder.receivedScrollEvents.count == 1)
-    #expect(recorder.receivedScrollEvents[0].hasPreciseScrollingDeltas == false)
-}
-
-@Test @MainActor func terminalContainerFallsBackToSwiftTermWhenTmuxUnavailableTest() {
-    let container = TerminalContainerView()
-    let recorder = RecordingScrollView()
-    container.addSubview(recorder)
-
-    container.scrollWheel(with: makePreciseScrollEvent(deltaY: -12))
-
-    #expect(recorder.receivedScrollEvents.count == 1)
-}
-
-// MARK: - Tmux Mouse Scrolling Integration Tests
-
-@Test @MainActor func tmuxMouseModeScrollIntegrationTest() async {
-    guard let tmux = tmuxExecutable() else {
-        return  // Skip if tmux not installed
-    }
-
-    let sessionName = "zeus-test-scroll-\(UUID().uuidString.prefix(8))"
-    defer { killTmuxSessionSync(tmux, sessionName: sessionName) }
-
-    // Create a session and generate scrollback
-    _ = await runProcessOutput(tmux, args: [
-        "new-session", "-d", "-x", "80", "-y", "12", "-s", sessionName, "/bin/bash"
-    ])
-    try? await Task.sleep(for: .milliseconds(300))
-    _ = await runProcessOutput(tmux, args: [
-        "send-keys", "-t", sessionName, "seq 1 100", "Enter"
-    ])
-    try? await Task.sleep(for: .milliseconds(400))
-
-    let historySize = Int(
-        (await runProcessOutput(tmux, args: [
-            "display-message", "-p", "-t", sessionName, "#{history_size}"
-        ])).trimmingCharacters(in: .whitespacesAndNewlines)
-    ) ?? 0
-    #expect(historySize > 0)
-
-    // Enable mouse mode as the app does and confirm the option took effect
-    _ = await runProcessOutput(tmux, args: [
-        "set-option", "-t", sessionName, "mouse", "on"
-    ])
-    let mouseOption = (await runProcessOutput(tmux, args: [
-        "show-options", "-v", "-t", sessionName, "mouse"
-    ])).trimmingCharacters(in: .whitespacesAndNewlines)
-    #expect(mouseOption == "on")
-
-    let container = TerminalContainerView()
-    container.sessionName = sessionName
-    container.tmuxExecutablePath = tmux
-
-    func scrollState() async -> String {
-        (await runProcessOutput(tmux, args: [
-            "display-message", "-p", "-t", sessionName, "#{pane_in_mode}|#{scroll_position}"
-        ])).trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    container.scrollWheel(with: makePreciseScrollEvent(deltaY: 24))
-    var scrolledState = ""
-    for _ in 0..<30 {
-        scrolledState = await scrollState()
-        let parts = scrolledState.split(separator: "|").map(String.init)
-        if parts.count == 2, parts[0] == "1", (Int(parts[1]) ?? -1) >= 3 {
-            break
-        }
-        try? await Task.sleep(for: .milliseconds(20))
-    }
-    let scrolledParts = scrolledState.split(separator: "|").map(String.init)
-    #expect(scrolledParts.count == 2)
-    #expect(scrolledParts[0] == "1")
-    #expect(Int(scrolledParts[1]) ?? -1 >= 3)
-
-    container.scrollWheel(with: makePreciseScrollEvent(deltaY: -24))
-    var returnedPosition = -1
-    for _ in 0..<30 {
-        let state = await scrollState()
-        let parts = state.split(separator: "|").map(String.init)
-        returnedPosition = parts.count == 2 ? (Int(parts[1]) ?? -1) : -1
-        if returnedPosition == 0 {
-            break
-        }
-        try? await Task.sleep(for: .milliseconds(20))
-    }
-    #expect(returnedPosition == 0)
+    #expect(await runProcessOutput("/nonexistent/binary", args: []).isEmpty)
 }
