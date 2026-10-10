@@ -297,24 +297,6 @@ private struct WindowControlBar: View {
         }
         .help(terminalVisible ? "Hide Terminal" : "Show Terminal")
 
-        Button {} label: {
-            Image(systemName: "plus")
-        }
-        .disabled(true)
-        .help("New Window is unavailable without tmux")
-
-        Button {} label: {
-            Image(systemName: "chevron.left")
-        }
-        .disabled(true)
-        .help("Previous Window is unavailable without tmux")
-
-        Button {} label: {
-            Image(systemName: "chevron.right")
-        }
-        .disabled(true)
-        .help("Next Window is unavailable without tmux")
-
         Divider().frame(height: 16)
 
         Button {

@@ -1,32 +1,14 @@
 # Terminal Trackpad and Mouse Scrolling
 
-## Constraint
+Open-Zeus embeds a SwiftTerm view for each direct shell. `TerminalContainerView` forwards AppKit scroll-wheel events to the embedded terminal view, where SwiftTerm handles its local scrollback.
 
-The Command Line Tools-compatible SwiftTerm revision used by OpenZeus predates SwiftTerm's tmux mouse-wheel reporting. Later SwiftTerm releases include Metal shaders and require the `metal` compiler, which is unavailable in this Command Line Tools-only setup.
+## Event routing
 
-## Event Routing
+- Trackpad and mouse-wheel events received by the terminal container are sent to its embedded SwiftTerm view.
+- When there is no embedded terminal view, the container falls back to AppKit's default scroll handling.
+- Each pane owns its own terminal view and scrollback buffer.
 
-- AppKit delivers trackpad and mouse-wheel events to `TerminalContainerView`.
-- For tmux-backed sessions, precise deltas accumulate into scroll steps; discrete wheel deltas become steps directly.
-- OpenZeus flushes pending steps in short batches, enters tmux copy mode when scrolling up, and sends `scroll-up` or `scroll-down` to the session's active pane.
-- Without tmux, OpenZeus forwards the original event to SwiftTerm so its local history continues to scroll.
+## Verification
 
-## Tradeoffs
-
-- Tmux CLI commands preserve scrolling without requiring a SwiftTerm version that compiles Metal shaders.
-- Scroll commands target the session's active pane rather than the pane under the pointer.
-- Scroll input is batched briefly to limit process launches while keeping trackpad movement responsive.
-
-## Automated Verification
-
-- Unit tests verify direct-shell events still reach SwiftTerm.
-- A tmux integration test synthesizes trackpad scroll events and checks that tmux enters copy mode, moves into history, and returns to the live output when scrolling down.
-
-## Manual Verification
-
-- A slow two-finger gesture scrolls while fingers are moving.
-- A fast flick continues scrolling through momentum events.
-- Reversing direction responds correctly.
-- Mouse-wheel ticks scroll in both directions.
-- Scrolling down returns to live output.
-- Direct shell sessions continue to scroll SwiftTerm's local history.
+- Unit tests verify scroll events are forwarded to SwiftTerm.
+- Manual checks should cover slow trackpad movement, momentum scrolling, reversing direction, mouse-wheel ticks, and scrolling through local history.

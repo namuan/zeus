@@ -23,7 +23,7 @@ This document describes the current direct-shell terminal model in Open-Zeus.
 
 - Split Pane Horizontally and Split Pane Vertically create the app-managed secondary pane.
 - Close Active Pane is enabled while a secondary pane exists and closes the focused pane.
-- Legacy New Window, Previous Window, and Next Window controls remain visible but disabled.
+- Tmux-only window creation and navigation controls are not shown.
 - Controls for pane rotation, pane zoom, and Terminal.app pop-out are not shown.
 
 ## Input and process activity

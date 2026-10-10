@@ -1,4 +1,8 @@
-# Direct-Shell POC Plan
+# Direct-Shell POC Plan and Status
+
+## Status
+
+The direct-shell implementation is complete. Current behavior is documented in `plans/TERMINAL_WINDOW_MANAGEMENT.md`; manual UI verification remains.
 
 ## Scope
 
