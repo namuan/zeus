@@ -1,0 +1,1 @@
+Remove disabled tmux window controls and refresh terminal documentation to match the direct-shell, app-managed split implementation.
