@@ -1309,7 +1309,6 @@ private struct AppLauncherButton: View {
                 logInfo("AppLauncherButton: opening '\(app.displayName)' at '\(directory)'")
                 let configuration = NSWorkspace.OpenConfiguration()
                 configuration.activates = true
-                configuration.createsNewApplicationInstance = true
                 NSWorkspace.shared.open(
                     [directoryURL],
                     withApplicationAt: appURL,
