@@ -1,0 +1,1 @@
+Update the transcript settings description to reflect that sanitized direct PTY output is recorded without tmux.
