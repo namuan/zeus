@@ -9,503 +9,158 @@ enum ZeusCommandVariables {
 
     static func expand(_ command: String, projectDirectory: String) -> String {
         guard command.contains(projectDirectoryToken) else { return command }
-        let resolvedProjectDirectory = projectDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !resolvedProjectDirectory.isEmpty else { return command }
-
-        return command.replacingOccurrences(of: projectDirectoryToken, with: resolvedProjectDirectory)
+        let directory = projectDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !directory.isEmpty else { return command }
+        return command.replacingOccurrences(of: projectDirectoryToken, with: directory)
     }
 }
 
-struct TmuxWindow: Equatable {
-    let index: Int
-    let name: String
+final class RecordingLocalProcessTerminalView: LocalProcessTerminalView {
+    var outputHandler: ((Data) -> Void)?
+
+    override func dataReceived(slice: ArraySlice<UInt8>) {
+        outputHandler?(Data(slice))
+        super.dataReceived(slice: slice)
+    }
+}
+
+enum TerminalSplitOrientation {
+    case horizontal
+    case vertical
 }
 
 @MainActor
 final class TerminalEntry: ObservableObject {
     let taskID: UUID
-    let terminalView: LocalProcessTerminalView
+    let paneID: UUID
+    let isPrimaryPane: Bool
+    let terminalView: RecordingLocalProcessTerminalView
     @Published var isRunning = false {
         didSet {
-            logInfo("isRunning changed: \(isRunning)")
             isRunning ? startPolling() : stopPolling()
         }
     }
-    @Published var hasActiveProcess = false {
-        didSet { logDebug("hasActiveProcess changed: \(hasActiveProcess)") }
-    }
-    @Published var tmuxUnavailable = false {
-        didSet { logInfo("tmuxUnavailable changed: \(tmuxUnavailable)") }
-    }
-    @Published var windows: [TmuxWindow] = [] {
-        didSet {
-            logInfo("windows changed: count=\(windows.count), windows=\(windows.map { "\($0.index):\($0.name)" })")
-        }
-    }
-    @Published var currentWindowIndex: Int = 0 {
-        didSet { logDebug("currentWindowIndex changed: \(currentWindowIndex)") }
-    }
-    @Published var paneCount: Int = 1 {
-        didSet { logDebug("paneCount changed: \(paneCount)") }
-    }
-    @Published var activePaneDirectory: String = "" {
-        didSet { logDebug("activePaneDirectory changed: '\(activePaneDirectory)'") }
-    }
-    @Published var mouseReportingEnabled: Bool = true {
-        didSet { logDebug("mouseReportingEnabled changed: \(mouseReportingEnabled)") }
-    }
-    var workingDirectory: String = "" {
-        didSet { logDebug("workingDirectory changed: '\(workingDirectory)'") }
-    }
-    var projectDirectory: String = "" {
-        didSet { logDebug("projectDirectory changed: '\(projectDirectory)'") }
-    }
-    var taskName: String = "" {
-        didSet { logDebug("taskName changed: '\(taskName)'") }
-    }
-    var projectName: String = "" {
-        didSet { logDebug("projectName changed: '\(projectName)'") }
-    }
-
+    @Published var hasActiveProcess = false
+    @Published var activePaneDirectory = ""
+    @Published var mouseReportingEnabled = true
+    @Published var secondaryPane: TerminalEntry?
+    @Published var splitOrientation: TerminalSplitOrientation?
+    @Published var focusedPaneID: UUID
+    @Published var primaryPaneClosed = false
+    var workingDirectory = ""
+    var projectDirectory = ""
+    var taskName = ""
+    var projectName = ""
+    var recordsTranscript = false
+    var onOutput: ((Data) -> Void)?
+    var onProcessTerminated: (() -> Void)?
     let config: TerminalConfig
     private let delegate: TerminalEntryDelegate
     private var pollTimer: Timer?
-    var onSessionStateRefreshed: ((String, String) -> Void)?
-
-    private var sessionName: String { "\(config.tmuxSessionPrefix)\(taskID.uuidString)" }
+    weak var parentEntry: TerminalEntry?
     private var knownShells: Set<String> { Set(config.knownShells) }
 
-    init(taskID: UUID, config: TerminalConfig = .init()) {
+    init(taskID: UUID, config: TerminalConfig = .init(), paneID: UUID? = nil, isPrimaryPane: Bool = true) {
         self.taskID = taskID
+        self.paneID = paneID ?? taskID
+        self.isPrimaryPane = isPrimaryPane
+        focusedPaneID = paneID ?? taskID
         self.config = config
-        logInfo("TerminalEntry created for task \(taskID.uuidString)")
-        terminalView = LocalProcessTerminalView(frame: .zero)
+        terminalView = RecordingLocalProcessTerminalView(frame: .zero)
         terminalView.font = resolvedFont(config)
-        let d = TerminalEntryDelegate()
-        delegate = d
-        d.entry = self
-        terminalView.processDelegate = d
+        let delegate = TerminalEntryDelegate()
+        self.delegate = delegate
+        delegate.entry = self
+        terminalView.processDelegate = delegate
+        terminalView.outputHandler = { [weak self] data in
+            guard let self, self.recordsTranscript else { return }
+            self.onOutput?(data)
+        }
     }
 
     func focusTerminalView() {
-        terminalView.window?.makeFirstResponder(terminalView)
+        let terminal = activeTerminal
+        terminal.terminalView.window?.makeFirstResponder(terminal.terminalView)
     }
 
     func updateFont(_ config: TerminalConfig) {
         terminalView.font = resolvedFont(config)
     }
 
-    private func startPolling() {
-        guard pollTimer == nil else {
-            logDebug("startPolling: already polling, skipping")
+    var activeTerminal: TerminalEntry {
+        guard isPrimaryPane, let secondaryPane else { return self }
+        if primaryPaneClosed || focusedPaneID == secondaryPane.paneID { return secondaryPane }
+        return self
+    }
+
+    var hasActivePaneProcess: Bool {
+        (!primaryPaneClosed && hasActiveProcess) || secondaryPane?.hasActiveProcess == true
+    }
+
+    func focusPane(_ paneID: UUID) {
+        guard isPrimaryPane else {
+            parentEntry?.focusPane(paneID)
             return
         }
-        logInfo("startPolling: beginning \(config.pollIntervalSeconds)-second polling cycle")
-        Task { await checkActiveProcess() }  // immediate check on start
+        focusedPaneID = primaryPaneClosed && paneID == self.paneID ? secondaryPane?.paneID ?? paneID : paneID
+        let terminal = activeTerminal
+        activePaneDirectory = terminal.activePaneDirectory.isEmpty ? terminal.workingDirectory : terminal.activePaneDirectory
+    }
+
+    func currentPaneDirectory(fallback: String? = nil) async -> String {
+        let terminal = activeTerminal
+        let directory = terminal.activePaneDirectory.isEmpty ? (fallback ?? terminal.workingDirectory) : terminal.activePaneDirectory
+        guard let url = URL(string: directory), url.isFileURL else { return directory }
+        return url.path
+    }
+
+    func changeDirectory(to directory: String) async -> Bool {
+        let terminal = activeTerminal
+        guard terminal.isRunning, !terminal.hasActiveProcess else { return false }
+        let quotedDirectory = "'\(directory.replacingOccurrences(of: "'", with: "'\"'\"'"))'"
+        terminal.sendRawCommand("cd -- \(quotedDirectory)")
+        terminal.workingDirectory = directory
+        terminal.activePaneDirectory = directory
+        if terminal !== self { activePaneDirectory = directory }
+        return true
+    }
+
+    func sendCommand(_ command: String) {
+        let terminal = activeTerminal
+        let expandedCommand = ZeusCommandVariables.expand(command, projectDirectory: terminal.projectDirectory)
+        terminal.sendRawCommand(expandedCommand)
+    }
+
+    private func sendRawCommand(_ command: String) {
+        let bytes = Array((command + "\n").utf8)
+        terminalView.send(data: bytes[...])
+    }
+
+    private func startPolling() {
+        guard pollTimer == nil else { return }
+        Task { await checkActiveProcess() }
         pollTimer = Timer.scheduledTimer(withTimeInterval: config.pollIntervalSeconds, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            Task { await self.checkActiveProcess() }
+            Task { @MainActor [weak self] in
+                await self?.checkActiveProcess()
+            }
         }
     }
 
     private func stopPolling() {
-        logInfo("stopPolling: stopping poll timer")
         pollTimer?.invalidate()
         pollTimer = nil
         hasActiveProcess = false
     }
 
     private func checkActiveProcess() async {
-        logDebug("checkActiveProcess: starting for session \(sessionName)")
-
-        guard let tmux = tmuxExecutable(searchPaths: config.tmuxSearchPaths) else {
-            logWarning("checkActiveProcess: tmux executable not found")
+        guard isRunning else { return }
+        let shellPID = Int(terminalView.process.shellPid)
+        guard shellPID > 0 else {
+            hasActiveProcess = false
             return
         }
-        logDebug("checkActiveProcess: using tmux at \(tmux)")
-
-        async let paneFuture = runProcessOutput(tmux, args: [
-            "display-message", "-p", "-t", sessionName, "#{pane_pid} #{pane_current_command}",
-        ])
-        async let windowsFuture = runProcessOutput(tmux, args: [
-            "list-windows", "-t", sessionName, "-F",
-            "#{window_index}|#{window_name}|#{window_active}",
-        ])
-        async let panesFuture = runProcessOutput(tmux, args: [
-            "list-panes", "-t", sessionName,
-        ])
-        async let directoryFuture = runProcessOutput(tmux, args: [
-            "display-message", "-p", "-t", sessionName, "#{pane_current_path}",
-        ])
-        let (paneOutput, windowsOutput, panesOutput, directoryOutput) = await (
-            paneFuture, windowsFuture, panesFuture, directoryFuture
-        )
-
-        logDebug("checkActiveProcess: paneOutput='\(paneOutput)'")
-        logDebug("checkActiveProcess: windowsOutput='\(windowsOutput)'")
-        logDebug("checkActiveProcess: panesOutput='\(panesOutput)'")
-        let directory = directoryOutput.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !directory.isEmpty, activePaneDirectory != directory {
-            activePaneDirectory = directory
-        }
-
-        let paneInfo = parseActivePaneInfo(paneOutput)
-        let command = paneInfo.command
-        let resolvedCommand = await resolvedActiveCommand(
-            paneInfo: paneInfo,
-            knownShells: knownShells
-        )
-        let isActive = resolvedCommand != nil
-        let context = "task='\(taskName)' (\(taskID.uuidString)), project='\(projectName)'"
-        if command.isEmpty {
-            logInfo("checkActiveProcess: \(context) — command empty, badge hidden")
-        } else if let resolvedCommand {
-            if resolvedCommand == command {
-                logInfo("checkActiveProcess: \(context) — command='\(resolvedCommand)', showing Active badge")
-            } else {
-                logInfo("checkActiveProcess: \(context) — command='\(command)', resolved descendant='\(resolvedCommand)', showing Active badge")
-            }
-        } else if knownShells.contains(command) {
-            logInfo("checkActiveProcess: \(context) — command='\(command)' is a known shell, badge hidden")
-        } else {
-            logInfo("checkActiveProcess: \(context) — command='\(command)', showing Active badge")
-        }
-        hasActiveProcess = isActive
-
-        parseWindowState(windowsOutput)
-
-        let count = panesOutput.split(separator: "\n").filter { !$0.isEmpty }.count
-        paneCount = max(1, count)
-        logDebug("checkActiveProcess: pane count updated to \(paneCount)")
-        onSessionStateRefreshed?(sessionName, tmux)
-    }
-
-    private func parseWindowState(_ output: String) {
-        logDebug("parseWindowState: input length=\(output.count), raw='\(output)'")
-        let lines = output
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .split(separator: "\n")
-            .map(String.init)
-            .filter { !$0.isEmpty }
-        logDebug("parseWindowState: \(lines.count) lines after splitting")
-
-        if lines.isEmpty {
-            logWarning("parseWindowState: no lines to parse - tmux session may not exist or be stale")
-            return
-        }
-
-        var wins: [TmuxWindow] = []
-        var activeIdx = 0
-        for (lineNum, line) in lines.enumerated() {
-            let parts = line.split(separator: "|", maxSplits: 2).map(String.init)
-            logDebug("parseWindowState: line \(lineNum): '\(line)' -> \(parts.count) parts: \(parts)")
-            guard parts.count == 3, let idx = Int(parts[0]) else {
-                logWarning("parseWindowState: SKIPPED line \(lineNum) - expected 3 pipe-separated parts with numeric index, got \(parts.count) parts")
-                continue
-            }
-            wins.append(TmuxWindow(index: idx, name: parts[1]))
-            if parts[2].trimmingCharacters(in: .whitespacesAndNewlines) == "1" {
-                activeIdx = idx
-                logDebug("parseWindowState: window \(idx) (\(parts[1])) is active")
-            }
-        }
-
-        logInfo("parseWindowState: parsed \(wins.count) windows, active=\(activeIdx), previous count=\(windows.count)")
-        if !wins.isEmpty {
-            windows = wins
-            currentWindowIndex = activeIdx
-            logInfo("parseWindowState: UPDATED windows array - now \(windows.count) windows")
-        } else {
-            logWarning("parseWindowState: NO UPDATE - all lines failed to parse, windows still at \(windows.count)")
-        }
-    }
-
-    // MARK: - Tmux window control
-
-    func openWindow() {
-        logInfo("openWindow: requested for session \(sessionName), current windows count=\(windows.count)")
-
-        guard let tmux = tmuxExecutable(searchPaths: config.tmuxSearchPaths) else {
-            logError("openWindow: tmux executable not found")
-            return
-        }
-
-        Task {
-            let directory = await currentPaneDirectory(using: tmux)
-            var args = ["new-window", "-t", sessionName]
-            if !directory.isEmpty {
-                args += ["-c", directory]
-                logDebug("openWindow: using current pane directory '\(directory)'")
-            }
-            logInfo("openWindow: executing \(tmux) \(args.joined(separator: " "))")
-
-            let output = await runProcessOutput(tmux, args: args)
-            logInfo("openWindow: tmux new-window completed, output='\(output)'")
-            await runProcessOutput(tmux, args: ["set-option", "-w", "-t", sessionName, "mouse", "on"])
-            await runProcessOutput(tmux, args: ["set-option", "-w", "-t", sessionName, "focus-follows-mouse", "on"])
-
-            logDebug("openWindow: waiting \(config.tmuxSettleDelayMs)ms for tmux to settle...")
-            try? await Task.sleep(for: .milliseconds(config.tmuxSettleDelayMs))
-
-            logDebug("openWindow: calling checkActiveProcess to refresh state")
-            await checkActiveProcess()
-
-            logInfo("openWindow: completed - windows now count=\(windows.count), names=\(windows.map { $0.name })")
-        }
-    }
-
-    func nextWindow() {
-        logInfo("nextWindow: requested for session \(sessionName), current index=\(currentWindowIndex), windows=\(windows.count)")
-
-        guard let tmux = tmuxExecutable(searchPaths: config.tmuxSearchPaths) else {
-            logError("nextWindow: tmux executable not found")
-            return
-        }
-
-        Task {
-            logDebug("nextWindow: executing tmux next-window")
-            let output = await runProcessOutput(tmux, args: ["next-window", "-t", sessionName])
-            logDebug("nextWindow: tmux output='\(output)'")
-
-            try? await Task.sleep(for: .milliseconds(config.tmuxSettleDelayMs))
-
-            logDebug("nextWindow: refreshing state")
-            await checkActiveProcess()
-            logInfo("nextWindow: completed - now at index=\(currentWindowIndex)")
-        }
-    }
-
-    func previousWindow() {
-        logInfo("previousWindow: requested for session \(sessionName), current index=\(currentWindowIndex), windows=\(windows.count)")
-
-        guard let tmux = tmuxExecutable(searchPaths: config.tmuxSearchPaths) else {
-            logError("previousWindow: tmux executable not found")
-            return
-        }
-
-        Task {
-            logDebug("previousWindow: executing tmux previous-window")
-            let output = await runProcessOutput(tmux, args: ["previous-window", "-t", sessionName])
-            logDebug("previousWindow: tmux output='\(output)'")
-
-            try? await Task.sleep(for: .milliseconds(config.tmuxSettleDelayMs))
-
-            logDebug("previousWindow: refreshing state")
-            await checkActiveProcess()
-            logInfo("previousWindow: completed - now at index=\(currentWindowIndex)")
-        }
-    }
-
-    func splitHorizontal() {
-        logInfo("splitHorizontal: requested")
-        splitPane(direction: "-h")
-    }
-
-    func splitVertical() {
-        logInfo("splitVertical: requested")
-        splitPane(direction: "-v")
-    }
-
-    private func splitPane(direction: String) {
-        logInfo("splitPane: direction=\(direction), session=\(sessionName)")
-
-        guard let tmux = tmuxExecutable(searchPaths: config.tmuxSearchPaths) else {
-            logError("splitPane: tmux executable not found")
-            return
-        }
-
-        Task {
-            let directory = await currentPaneDirectory(using: tmux)
-            var args = ["split-window", direction, "-t", sessionName]
-            if !directory.isEmpty {
-                args += ["-c", directory]
-                logDebug("splitPane: using current pane directory '\(directory)'")
-            }
-            logDebug("splitPane: executing \(tmux) \(args.joined(separator: " "))")
-
-            let output = await runProcessOutput(tmux, args: args)
-            logDebug("splitPane: tmux output='\(output)'")
-
-            try? await Task.sleep(for: .milliseconds(config.tmuxSettleDelayMs))
-            await checkActiveProcess()
-            logInfo("splitPane: completed - pane count now \(paneCount)")
-        }
-    }
-
-    func rotatePane() {
-        logInfo("rotatePane: requested for session \(sessionName), pane count=\(paneCount)")
-
-        guard let tmux = tmuxExecutable(searchPaths: config.tmuxSearchPaths) else {
-            logError("rotatePane: tmux executable not found")
-            return
-        }
-
-        Task {
-            logDebug("rotatePane: executing tmux select-pane")
-            let output = await runProcessOutput(tmux, args: ["select-pane", "-t", "\(sessionName):.+"])
-            logDebug("rotatePane: tmux output='\(output)'")
-
-            try? await Task.sleep(for: .milliseconds(config.tmuxSettleDelayMs))
-            await checkActiveProcess()
-            logInfo("rotatePane: completed")
-        }
-    }
-
-    func togglePaneZoom() {
-        logInfo("togglePaneZoom: requested for session \(sessionName)")
-
-        guard let tmux = tmuxExecutable(searchPaths: config.tmuxSearchPaths) else {
-            logError("togglePaneZoom: tmux executable not found")
-            return
-        }
-
-        Task {
-            logDebug("togglePaneZoom: executing tmux resize-pane -Z")
-            let output = await runProcessOutput(tmux, args: ["resize-pane", "-Z", "-t", sessionName])
-            logDebug("togglePaneZoom: tmux output='\(output)'")
-
-            try? await Task.sleep(for: .milliseconds(config.tmuxSettleDelayMs))
-            await checkActiveProcess()
-            logInfo("togglePaneZoom: completed")
-        }
-    }
-
-    func closeWindow() {
-        logInfo("closeWindow: requested for session \(sessionName), windows count=\(windows.count)")
-
-        guard let tmux = tmuxExecutable(searchPaths: config.tmuxSearchPaths) else {
-            logError("closeWindow: tmux executable not found")
-            return
-        }
-
-        Task {
-            logDebug("closeWindow: executing tmux kill-window")
-            let output = await runProcessOutput(tmux, args: ["kill-window", "-t", sessionName])
-            logDebug("closeWindow: tmux output='\(output)'")
-
-            try? await Task.sleep(for: .milliseconds(config.tmuxSettleDelayMs))
-            await checkActiveProcess()
-            logInfo("closeWindow: completed - windows now count=\(windows.count)")
-        }
-    }
-
-    func popOut() {
-        logInfo("popOut: opening session \(sessionName) in Terminal.app")
-
-        guard let tmux = tmuxExecutable(searchPaths: config.tmuxSearchPaths) else { return }
-
-        let path = FileManager.default.temporaryDirectory
-            .appendingPathComponent("zeus-popout-\(taskID.uuidString).command")
-        try? "#!/bin/bash\n\(tmux) attach -t \(sessionName)\n"
-            .write(to: path, atomically: true, encoding: .utf8)
-        try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path.path)
-
-        if NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Terminal").isEmpty {
-            NSWorkspace.shared.open(
-                [path],
-                withApplicationAt: URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app"),
-                configuration: NSWorkspace.OpenConfiguration()
-            )
-        } else {
-            NSWorkspace.shared.open(path)
-            Task {
-                try? await Task.sleep(for: .milliseconds(200))
-                NSRunningApplication.runningApplications(
-                    withBundleIdentifier: "com.apple.Terminal"
-                ).first?.activate()
-            }
-        }
-    }
-
-    func selectWindow(index: Int) {
-        logInfo("selectWindow: requested index=\(index), current=\(currentWindowIndex)")
-
-        guard let tmux = tmuxExecutable(searchPaths: config.tmuxSearchPaths) else {
-            logError("selectWindow: tmux executable not found")
-            return
-        }
-
-        Task {
-            logDebug("selectWindow: executing tmux select-window \(sessionName):\(index)")
-            let output = await runProcessOutput(tmux, args: ["select-window", "-t", "\(sessionName):\(index)"])
-            logDebug("selectWindow: tmux output='\(output)'")
-
-            try? await Task.sleep(for: .milliseconds(config.tmuxSettleDelayMs))
-            await checkActiveProcess()
-            logInfo("selectWindow: completed - now at index=\(currentWindowIndex)")
-        }
-    }
-
-    func currentPaneDirectory(fallback: String? = nil) async -> String {
-        guard let tmux = tmuxExecutable(searchPaths: config.tmuxSearchPaths) else {
-            return fallback ?? workingDirectory
-        }
-        return await currentPaneDirectory(using: tmux, fallback: fallback)
-    }
-
-    private func currentPaneDirectory(using tmux: String, fallback: String? = nil) async -> String {
-        let output = await runProcessOutput(tmux, args: [
-            "display-message", "-p", "-t", sessionName, "#{pane_current_path}"
-        ])
-        let directory = output.trimmingCharacters(in: .whitespacesAndNewlines)
-        return directory.isEmpty ? (fallback ?? workingDirectory) : directory
-    }
-
-    func changeDirectory(to directory: String) async -> Bool {
-        guard !tmuxUnavailable,
-              let tmux = tmuxExecutable(searchPaths: config.tmuxSearchPaths) else {
-            return false
-        }
-        let quotedDirectory = "'\(directory.replacingOccurrences(of: "'", with: "'\"'\"'"))'"
-        let command = "cd -- \(quotedDirectory)"
-        await runProcessOutput(tmux, args: ["send-keys", "-t", sessionName, "-l", "--", command])
-        await runProcessOutput(tmux, args: ["send-keys", "-t", sessionName, "Enter"])
-        return true
-    }
-
-    func sendCommand(_ command: String, inNewVerticalPane: Bool = false) {
-        let expandedCommand = ZeusCommandVariables.expand(command, projectDirectory: projectDirectory)
-        logInfo("sendCommand: '\(command)', inNewVerticalPane=\(inNewVerticalPane), tmuxUnavailable=\(tmuxUnavailable)")
-        if expandedCommand != command {
-            logInfo("sendCommand: expanded variables using projectDirectory='\(projectDirectory)'")
-        }
-
-        if !tmuxUnavailable, let tmux = tmuxExecutable(searchPaths: config.tmuxSearchPaths) {
-            Task {
-                let target: String
-                if inNewVerticalPane {
-                    logDebug("sendCommand: creating vertical pane for command")
-                    target = await createVerticalPane(using: tmux, sessionName: sessionName)
-                    logDebug("sendCommand: new pane target=\(target)")
-                } else {
-                    target = sessionName
-                }
-                logDebug("sendCommand: sending to target=\(target)")
-                await runProcessOutput(tmux, args: ["send-keys", "-t", target, expandedCommand, "Enter"])
-
-                try? await Task.sleep(for: .milliseconds(config.tmuxSettleDelayMs))
-                await checkActiveProcess()
-                logInfo("sendCommand: completed via tmux")
-            }
-        } else {
-            logDebug("sendCommand: sending directly to terminal view (no tmux)")
-            let bytes = Array((expandedCommand + "\n").utf8)
-            terminalView.send(data: bytes[...])
-            logInfo("sendCommand: completed via direct PTY write")
-        }
-    }
-
-    private func createVerticalPane(using tmux: String, sessionName: String) async -> String {
-        logDebug("createVerticalPane: session=\(sessionName)")
-        let directory = await currentPaneDirectory(using: tmux)
-        var args = ["split-window", "-h", "-P", "-F", "#{pane_id}", "-t", sessionName]
-        if !directory.isEmpty {
-            args += ["-c", directory]
-        }
-        let output = await runProcessOutput(tmux, args: args)
-        let paneID = output.trimmingCharacters(in: .whitespacesAndNewlines)
-        logDebug("createVerticalPane: pane_id='\(paneID)'")
-        return paneID.isEmpty ? sessionName : paneID
+        let paneInfo = ActivePaneInfo(pid: shellPID, command: URL(fileURLWithPath: config.resolvedShell).lastPathComponent)
+        hasActiveProcess = await resolvedActiveCommand(paneInfo: paneInfo, knownShells: knownShells) != nil
     }
 }
 
@@ -520,92 +175,56 @@ struct ProcessSnapshot: Equatable {
     let stat: String
     let command: String
 
-    var isForeground: Bool {
-        stat.contains("+")
-    }
+    var isForeground: Bool { stat.contains("+") }
 
     var executableName: String {
         command
             .split(separator: " ", maxSplits: 1)
             .first
             .map(String.init)
-            .map { token in
-                let normalized = token.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !normalized.isEmpty else { return "" }
-                return URL(fileURLWithPath: normalized).lastPathComponent
-            } ?? ""
+            .map { URL(fileURLWithPath: $0).lastPathComponent }
+            ?? ""
     }
 }
 
 func parseActivePaneInfo(_ output: String) -> ActivePaneInfo {
     let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else {
-        return ActivePaneInfo(pid: nil, command: "")
-    }
-
+    guard !trimmed.isEmpty else { return ActivePaneInfo(pid: nil, command: "") }
     let parts = trimmed.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true).map(String.init)
-    guard parts.count == 2 else {
-        return ActivePaneInfo(pid: nil, command: trimmed)
-    }
+    guard parts.count == 2 else { return ActivePaneInfo(pid: nil, command: trimmed) }
     return ActivePaneInfo(pid: Int(parts[0]), command: parts[1].trimmingCharacters(in: .whitespacesAndNewlines))
 }
 
 func parseProcessSnapshots(_ output: String) -> [ProcessSnapshot] {
-    output
-        .split(separator: "\n")
-        .compactMap { line in
-            let parts = line.split(separator: " ", maxSplits: 3, omittingEmptySubsequences: true)
-            guard parts.count == 4,
-                  let pid = Int(parts[0]),
-                  let parentPID = Int(parts[1]) else {
-                return nil
-            }
-            return ProcessSnapshot(
-                pid: pid,
-                parentPID: parentPID,
-                stat: String(parts[2]),
-                command: String(parts[3])
-            )
-        }
+    output.split(separator: "\n").compactMap { line in
+        let parts = line.split(separator: " ", maxSplits: 3, omittingEmptySubsequences: true)
+        guard parts.count == 4, let pid = Int(parts[0]), let parentPID = Int(parts[1]) else { return nil }
+        return ProcessSnapshot(pid: pid, parentPID: parentPID, stat: String(parts[2]), command: String(parts[3]))
+    }
 }
 
 func deepestLeafDescendant(in snapshots: [ProcessSnapshot], rootPID: Int) -> ProcessSnapshot? {
     let snapshotsByPID = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.pid, $0) })
     let childrenByParent = Dictionary(grouping: snapshots, by: \.parentPID)
-
     guard snapshotsByPID[rootPID] != nil else { return nil }
-
     var stack: [(pid: Int, depth: Int)] = [(rootPID, 0)]
     var visited: Set<Int> = []
     var descendants: [(snapshot: ProcessSnapshot, depth: Int)] = []
-
     while let current = stack.popLast() {
-        guard visited.insert(current.pid).inserted else { continue }
-        guard let children = childrenByParent[current.pid] else { continue }
-
+        guard visited.insert(current.pid).inserted, let children = childrenByParent[current.pid] else { continue }
         for child in children {
             descendants.append((child, current.depth + 1))
             stack.append((child.pid, current.depth + 1))
         }
     }
-
     let descendantPIDs = Set(descendants.map(\.snapshot.pid))
     let leaves = descendants.filter { candidate in
-        let childPIDs = childrenByParent[candidate.snapshot.pid, default: []].map(\.pid)
-        return childPIDs.allSatisfy { !descendantPIDs.contains($0) }
+        childrenByParent[candidate.snapshot.pid, default: []].allSatisfy { !descendantPIDs.contains($0.pid) }
     }
-
     guard !leaves.isEmpty else { return nil }
-
-    let preferredLeaves = leaves.contains(where: { $0.snapshot.isForeground })
-        ? leaves.filter { $0.snapshot.isForeground }
-        : leaves
-
-    return preferredLeaves.max { lhs, rhs in
-        if lhs.depth != rhs.depth {
-            return lhs.depth < rhs.depth
-        }
-        return lhs.snapshot.pid < rhs.snapshot.pid
+    let foreground = leaves.filter { $0.snapshot.isForeground }
+    return (foreground.isEmpty ? leaves : foreground).max {
+        $0.depth == $1.depth ? $0.snapshot.pid < $1.snapshot.pid : $0.depth < $1.depth
     }?.snapshot
 }
 
@@ -618,15 +237,11 @@ nonisolated func resolvedActiveCommand(
     let command = paneInfo.command.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !command.isEmpty else { return nil }
     guard knownShells.contains(command) else { return command }
-    guard let panePID = paneInfo.pid else { return nil }
-
-    let descendantPIDs = await descendantProcessIDs(rootPID: panePID, pgrepExecutable: pgrepExecutable)
-    let pidList = ([panePID] + descendantPIDs).map(String.init).joined(separator: ",")
-    let psOutput = await runProcessOutput(psExecutable, args: ["-o", "pid=,ppid=,stat=,command=", "-p", pidList])
-    let snapshots = parseProcessSnapshots(psOutput)
-    guard let leaf = deepestLeafDescendant(in: snapshots, rootPID: panePID) else {
-        return nil
-    }
+    guard let rootPID = paneInfo.pid else { return nil }
+    let descendantPIDs = await descendantProcessIDs(rootPID: rootPID, pgrepExecutable: pgrepExecutable)
+    let pidList = ([rootPID] + descendantPIDs).map(String.init).joined(separator: ",")
+    let output = await runProcessOutput(psExecutable, args: ["-o", "pid=,ppid=,stat=,command=", "-p", pidList])
+    guard let leaf = deepestLeafDescendant(in: parseProcessSnapshots(output), rootPID: rootPID) else { return nil }
     let leafCommand = leaf.executableName.trimmingCharacters(in: .whitespacesAndNewlines)
     return leafCommand.isEmpty ? nil : leafCommand
 }
@@ -635,47 +250,34 @@ nonisolated func descendantProcessIDs(rootPID: Int, pgrepExecutable: String = "/
     var visited: Set<Int> = [rootPID]
     var queue: [Int] = [rootPID]
     var descendants: [Int] = []
-
-    while let parentPID = queue.first {
-        queue.removeFirst()
+    while !queue.isEmpty {
+        let parentPID = queue.removeFirst()
         let output = await runProcessOutput(pgrepExecutable, args: ["-P", String(parentPID)])
-        let childPIDs = output
-            .split(separator: "\n")
-            .compactMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
-
-        for childPID in childPIDs where visited.insert(childPID).inserted {
+        for childPID in output.split(separator: "\n").compactMap({ Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) })
+        where visited.insert(childPID).inserted {
             descendants.append(childPID)
             queue.append(childPID)
         }
     }
-
     return descendants
 }
 
 @discardableResult
 nonisolated func runProcessOutput(_ executable: String, args: [String]) async -> String {
-    logDebug("runProcessOutput: \(executable) \(args.joined(separator: " "))")
-    return await withCheckedContinuation { continuation in
+    await withCheckedContinuation { continuation in
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = args
-        let pipe = Pipe()
-        let errorPipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = errorPipe
-        process.terminationHandler = { p in
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8) ?? ""
-            let stderr = String(data: errorData, encoding: .utf8) ?? ""
-            logDebug("runProcessOutput: terminated with status \(p.terminationStatus), stdout='\(output)', stderr='\(stderr)'")
-            continuation.resume(returning: output)
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = Pipe()
+        process.terminationHandler = { _ in
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            continuation.resume(returning: String(data: data, encoding: .utf8) ?? "")
         }
         do {
             try process.run()
-            logDebug("runProcessOutput: process started, pid=\(process.processIdentifier)")
         } catch {
-            logError("runProcessOutput: failed to start process: \(error)")
             continuation.resume(returning: "")
         }
     }
@@ -684,18 +286,25 @@ nonisolated func runProcessOutput(_ executable: String, args: [String]) async ->
 private final class TerminalEntryDelegate: NSObject, LocalProcessTerminalViewDelegate, @unchecked Sendable {
     weak var entry: TerminalEntry?
 
-    func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {
-        logDebug("TerminalEntryDelegate: size changed to \(newCols)x\(newRows)")
-    }
-    func setTerminalTitle(source: LocalProcessTerminalView, title: String) {
-        logDebug("TerminalEntryDelegate: title changed to '\(title)'")
-    }
+    func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
+    func setTerminalTitle(source: LocalProcessTerminalView, title: String) {}
+
     func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
-        logDebug("TerminalEntryDelegate: directory updated to '\(directory ?? "nil")'")
+        guard let directory else { return }
+        Task { @MainActor [weak entry] in
+            guard let entry else { return }
+            entry.activePaneDirectory = directory
+            if let parent = entry.parentEntry, parent.focusedPaneID == entry.paneID {
+                parent.activePaneDirectory = directory
+            }
+        }
     }
+
     func processTerminated(source: TerminalView, exitCode: Int32?) {
-        logInfo("TerminalEntryDelegate: process terminated with exitCode=\(exitCode.map { String($0) } ?? "nil")")
-        DispatchQueue.main.async { self.entry?.isRunning = false }
+        Task { @MainActor [weak entry] in
+            entry?.isRunning = false
+            entry?.onProcessTerminated?()
+        }
     }
 }
 
@@ -706,12 +315,9 @@ final class TerminalStore: ObservableObject {
     @Published private(set) var activeProcessTaskIDs: Set<UUID> = []
     @Published private(set) var attentionTaskIDs: Set<UUID> = []
     private var cancellables: Set<AnyCancellable> = []
-    private var periodicCleanupTask: Task<Void, Never>?
-    private var transcriptSyncTask: Task<Void, Never>?
-
     private var config: TerminalConfig
     private var taskMetadata: [UUID: (name: String, watchMode: WatchMode)] = [:]
-    private var transcriptEnabledTaskIDs: Set<UUID> = []
+    private var activePaneIDsByTask: [UUID: Set<UUID>] = [:]
     private let transcriptRecorder = TerminalTranscriptRecorder()
     private let notifier: ActivityNotifier
     nonisolated(unsafe) private var optionKeyMonitor: Any?
@@ -721,96 +327,143 @@ final class TerminalStore: ObservableObject {
 
     init(config: TerminalConfig = .init(), notificationConfig: NotificationConfig = .init()) {
         self.config = config
-        self.notifier = ActivityNotifier(config: notificationConfig)
+        notifier = ActivityNotifier(config: notificationConfig)
     }
 
     func updateTerminalConfig(_ config: TerminalConfig) {
         self.config = config
-        for entry in entries.values {
-            entry.updateFont(config)
-        }
+        allPaneEntries.forEach { $0.updateFont(config) }
     }
 
     deinit {
-        if let monitor = optionKeyMonitor {
-            NSEvent.removeMonitor(monitor)
-        }
-        if let monitor = shiftReturnMonitor {
-            NSEvent.removeMonitor(monitor)
-        }
-        if let monitor = returnFocusMonitor {
-            NSEvent.removeMonitor(monitor)
-        }
-        periodicCleanupTask?.cancel()
-        transcriptSyncTask?.cancel()
+        if let optionKeyMonitor { NSEvent.removeMonitor(optionKeyMonitor) }
+        if let shiftReturnMonitor { NSEvent.removeMonitor(shiftReturnMonitor) }
+        if let returnFocusMonitor { NSEvent.removeMonitor(returnFocusMonitor) }
     }
 
     func entry(for id: UUID, recordTranscript: Bool = false) -> TerminalEntry {
-        logInfo("TerminalStore.entry(for: \(id.uuidString)) - entries count=\(entries.count)")
-        if recordTranscript {
-            transcriptEnabledTaskIDs.insert(id)
+        if let entry = entries[id] {
+            entry.recordsTranscript = recordTranscript || entry.recordsTranscript
+            return entry
         }
-        if let existing = entries[id] {
-            logDebug("TerminalStore: returning existing entry")
-            return existing
-        }
-        logInfo("TerminalStore: creating new TerminalEntry")
         installOptionKeyMonitor()
         installShiftReturnMonitor()
         installReturnFocusMonitor()
         let entry = TerminalEntry(taskID: id, config: config)
-        entry.onSessionStateRefreshed = { [weak self, id] sessionName, tmux in
-            guard let self, self.transcriptEnabledTaskIDs.contains(id) else { return }
-            Task {
-                await self.transcriptRecorder.reconcile(taskID: id, sessionName: sessionName, tmux: tmux)
+        entry.recordsTranscript = recordTranscript
+        entry.onOutput = { [weak self] data in
+            guard let self else { return }
+            Task { await self.transcriptRecorder.append(data, taskID: id) }
+        }
+        entry.onProcessTerminated = { [weak self] in
+            guard let self else { return }
+            let root = self.entries[id]
+            if root?.isRunning != true, root?.secondaryPane?.isRunning != true {
+                Task { await self.transcriptRecorder.stop(taskID: id) }
             }
         }
         entries[id] = entry
-        entry.$hasActiveProcess
-            .removeDuplicates()
-            .scan((false, false)) { ($0.1, $1) }   // (previousValue, currentValue)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self, id] pair in
-                guard let self else { return }
-                let (wasActive, isActive) = pair
-                logDebug("TerminalStore: hasActiveProcess sink - wasActive=\(wasActive), isActive=\(isActive)")
-                if isActive {
-                    self.activeProcessTaskIDs.insert(id)
-                    logInfo("TerminalStore: task \(id.uuidString) became active")
-                } else {
-                    self.activeProcessTaskIDs.remove(id)
-                    // Transition active → idle: fire alert if watch mode is on
-                    if wasActive, let meta = self.taskMetadata[id], meta.watchMode != .off {
-                        logInfo("TerminalStore: task \(id.uuidString) transitioned active→idle, firing notification")
-                        self.attentionTaskIDs.insert(id)
-                        self.notifier.notify(taskName: meta.name, watchMode: meta.watchMode)
-                    }
-                }
-            }
-            .store(in: &cancellables)
+        observeActivity(entry)
         return entry
     }
 
-    /// Update cached metadata for a task (call when the task's terminal opens or watch mode changes).
     func updateTaskMetadata(taskID: UUID, name: String, watchMode: WatchMode, workingDirectory: String = "", projectDirectory: String = "", projectName: String = "", recordTranscript: Bool = true) {
-        logInfo("TerminalStore.updateTaskMetadata: task=\(taskID.uuidString), name='\(name)', watchMode=\(watchMode), cwd='\(workingDirectory)', projectDirectory='\(projectDirectory)', projectName='\(projectName)', recordTranscript=\(recordTranscript)")
-        taskMetadata[taskID] = (name: name, watchMode: watchMode)
-        if recordTranscript {
-            transcriptEnabledTaskIDs.insert(taskID)
-        } else {
-            transcriptEnabledTaskIDs.remove(taskID)
-        }
+        taskMetadata[taskID] = (name, watchMode)
+        entries[taskID]?.recordsTranscript = recordTranscript
+        entries[taskID]?.secondaryPane?.recordsTranscript = recordTranscript
         entries[taskID]?.taskName = name
         entries[taskID]?.workingDirectory = workingDirectory
         entries[taskID]?.projectDirectory = projectDirectory
+        entries[taskID]?.secondaryPane?.workingDirectory = entries[taskID]?.activeTerminal.workingDirectory ?? workingDirectory
+        entries[taskID]?.secondaryPane?.projectDirectory = projectDirectory
         if !projectName.isEmpty {
             entries[taskID]?.projectName = projectName
+            entries[taskID]?.secondaryPane?.projectName = projectName
         }
     }
 
-    /// Returns the shared `GitService` for the given working directory, creating one on first call.
-    /// The service is cached for the lifetime of `TerminalStore` so that git stats survive
-    /// navigation — the caller never sees a stale-nil state on re-visit.
+    private var allPaneEntries: [TerminalEntry] {
+        entries.values.flatMap { entry in [entry] + [entry.secondaryPane].compactMap { $0 } }
+    }
+
+    private func observeActivity(_ entry: TerminalEntry) {
+        let taskID = entry.taskID
+        let paneID = entry.paneID
+        entry.$hasActiveProcess
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] isActive in
+                guard let self else { return }
+                var paneIDs = self.activePaneIDsByTask[taskID, default: []]
+                let wasActive = !paneIDs.isEmpty
+                if isActive { paneIDs.insert(paneID) } else { paneIDs.remove(paneID) }
+                self.activePaneIDsByTask[taskID] = paneIDs
+                let isTaskActive = !paneIDs.isEmpty
+                if isTaskActive { self.activeProcessTaskIDs.insert(taskID) } else {
+                    self.activeProcessTaskIDs.remove(taskID)
+                }
+                if wasActive, !isTaskActive,
+                   let metadata = self.taskMetadata[taskID], metadata.watchMode != .off {
+                    self.attentionTaskIDs.insert(taskID)
+                    self.notifier.notify(taskName: metadata.name, watchMode: metadata.watchMode)
+                }
+            }
+            .store(in: &cancellables)
+    }
+
+    func splitTerminal(taskID: UUID, orientation: TerminalSplitOrientation) {
+        guard let root = entries[taskID] else { return }
+        if root.primaryPaneClosed, let active = root.secondaryPane {
+            root.workingDirectory = active.workingDirectory
+            root.activePaneDirectory = active.activePaneDirectory
+            root.terminalView.terminal.resetToInitialState()
+            root.terminalView.needsDisplay = true
+            root.primaryPaneClosed = false
+            root.splitOrientation = orientation
+            root.focusPane(active.paneID)
+            return
+        }
+        guard root.secondaryPane == nil else { return }
+        let active = root.activeTerminal
+        let pane = TerminalEntry(taskID: taskID, config: config, paneID: UUID(), isPrimaryPane: false)
+        pane.parentEntry = root
+        pane.recordsTranscript = root.recordsTranscript
+        pane.workingDirectory = active.workingDirectory
+        pane.activePaneDirectory = active.activePaneDirectory
+        pane.projectDirectory = active.projectDirectory
+        pane.projectName = active.projectName
+        pane.taskName = active.taskName
+        pane.onOutput = root.onOutput
+        pane.onProcessTerminated = root.onProcessTerminated
+        root.secondaryPane = pane
+        root.splitOrientation = orientation
+        observeActivity(pane)
+    }
+
+    func closeSplitTerminal(taskID: UUID) {
+        guard let root = entries[taskID], let pane = root.secondaryPane else { return }
+        if root.focusedPaneID == root.paneID, !root.primaryPaneClosed {
+            root.primaryPaneClosed = true
+            root.terminalView.terminate()
+            root.focusPane(pane.paneID)
+            var paneIDs = activePaneIDsByTask[taskID, default: []]
+            paneIDs.remove(root.paneID)
+            activePaneIDsByTask[taskID] = paneIDs
+            if paneIDs.isEmpty { activeProcessTaskIDs.remove(taskID) }
+            return
+        }
+        guard !root.primaryPaneClosed else { return }
+        pane.recordsTranscript = false
+        pane.terminalView.terminate()
+        root.secondaryPane = nil
+        root.splitOrientation = nil
+        root.focusPane(root.paneID)
+        var paneIDs = activePaneIDsByTask[taskID, default: []]
+        paneIDs.remove(pane.paneID)
+        activePaneIDsByTask[taskID] = paneIDs
+        if paneIDs.isEmpty { activeProcessTaskIDs.remove(taskID) }
+    }
+
     func gitService(for workingDirectory: String, config: GitConfig) -> GitService {
         if let existing = gitServices[workingDirectory] { return existing }
         let service = GitService(
@@ -823,8 +476,6 @@ final class TerminalStore: ObservableObject {
         return service
     }
 
-    /// Stops and removes the cached `GitService` for a working directory.
-    /// Call when a project is deleted to release file watchers and background tasks.
     func removeGitService(for workingDirectory: String) {
         gitServices[workingDirectory]?.stopWatching()
         gitServices.removeValue(forKey: workingDirectory)
@@ -832,228 +483,70 @@ final class TerminalStore: ObservableObject {
 
     private func installOptionKeyMonitor() {
         guard optionKeyMonitor == nil else { return }
-        logInfo("Installing Option key monitor for text selection")
         optionKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            guard let self else { return event }
-            let optionHeld = event.modifierFlags.contains(.option)
-            logDebug("Option key flagsChanged: optionHeld=\(optionHeld)")
+            let enabled = !event.modifierFlags.contains(.option)
             Task { @MainActor [weak self] in
-                guard let self else { return }
-                let newValue = !optionHeld
-                logDebug("Setting mouseReportingEnabled=\(newValue) on \(entries.count) entries")
-                for entry in entries.values where entry.mouseReportingEnabled != newValue {
-                    entry.mouseReportingEnabled = newValue
-                }
+                self?.allPaneEntries.forEach { $0.mouseReportingEnabled = enabled }
             }
             return event
         }
     }
 
-    // Intercept Shift+Return when a terminal view has focus and forward the kitty
-    // keyboard protocol sequence (ESC [ 1 3 ; 2 u) instead of plain \r, so apps
-    // like Claude Code can distinguish Shift+Enter (insert newline) from Enter (submit).
-    //
-    // Strategy: use `tmux send-keys -l` to inject the literal bytes directly into the
-    // active pane — this bypasses tmux's own key-binding / input-parsing layer and
-    // delivers the raw sequence to the running program (Claude Code) without needing
-    // any tmux extended-keys configuration.  Falls back to a direct PTY write when
-    // tmux is unavailable.
     private func installShiftReturnMonitor() {
         guard shiftReturnMonitor == nil else { return }
-        logInfo("Installing Shift+Return monitor for kitty keyboard protocol")
         shiftReturnMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            let relevantFlags = event.modifierFlags.intersection([.shift, .option, .command, .control, .function])
-            guard relevantFlags == .shift, event.keyCode == 36 || event.keyCode == 76 else {
-                return event
-            }
+            let flags = event.modifierFlags.intersection([.shift, .option, .command, .control, .function])
+            guard flags == .shift, event.keyCode == 36 || event.keyCode == 76 else { return event }
             Task { @MainActor [weak self] in
                 guard let self,
-                      let firstResponder = NSApplication.shared.keyWindow?.firstResponder
-                          as? LocalProcessTerminalView else { return }
-
-                if let entry = entries.values.first(where: { $0.terminalView === firstResponder }),
-                   !entry.tmuxUnavailable,
-                   let tmux = tmuxExecutable(searchPaths: config.tmuxSearchPaths) {
-                    // Inject ESC [ 1 3 ; 2 u (Shift+Enter, kitty keyboard protocol)
-                    // directly into the pane via `send-keys -l` (literal bytes).
-                    let sessionName = "\(config.tmuxSessionPrefix)\(entry.taskID.uuidString)"
-                    logDebug("Shift+Return: tmux send-keys -l to session \(sessionName)")
-                    await runProcessOutput(tmux, args: ["send-keys", "-t", sessionName, "-l", "\u{1b}[13;2u"])
-                } else {
-                    // No tmux — write directly to the PTY.
-                    logDebug("Shift+Return: direct PTY send of kitty ESC [ 1 3 ; 2 u")
-                    firstResponder.send([0x1b, 0x5b, 0x31, 0x33, 0x3b, 0x32, 0x75])
-                }
-            }
-            return nil // consume the event so SwiftTerm doesn't also send plain \r
-        }
-    }
-
-    private func installReturnFocusMonitor() {
-        guard returnFocusMonitor == nil else { return }
-        logInfo("Installing Return-focus monitor for terminal pane")
-        returnFocusMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            let relevantFlags = event.modifierFlags.intersection([.shift, .option, .command, .control, .function])
-            guard relevantFlags.isEmpty, event.keyCode == 36 || event.keyCode == 76 else { return event }
-            guard let firstResponder = NSApplication.shared.keyWindow?.firstResponder else { return event }
-            guard !(firstResponder is LocalProcessTerminalView) else { return event }
-            guard !(firstResponder is NSTextView) else { return event }
-            guard self?.selectedTaskID != nil else { return event }
-            Task { @MainActor [weak self] in
-                guard let self, let taskID = self.selectedTaskID,
-                      let entry = self.entries[taskID] else { return }
-                logDebug("Return-focus monitor: focusing terminal for task \(taskID.uuidString)")
-                entry.focusTerminalView()
+                      let view = NSApplication.shared.keyWindow?.firstResponder as? LocalProcessTerminalView,
+                      allPaneEntries.contains(where: { $0.terminalView === view }) else { return }
+                view.send([0x1b, 0x5b, 0x31, 0x33, 0x3b, 0x32, 0x75])
             }
             return nil
         }
     }
 
-    /// Kill the tmux session for a task and remove it from the cache.
-    func killSession(for taskID: UUID) {
-        logInfo("TerminalStore.killSession: task=\(taskID.uuidString)")
-        entries[taskID]?.isRunning = false
-        entries.removeValue(forKey: taskID)
-        if let tmux = tmuxExecutable(searchPaths: config.tmuxSearchPaths) {
-            let sessionName = "\(config.tmuxSessionPrefix)\(taskID.uuidString)"
-            logDebug("TerminalStore.killSession: killing tmux session \(sessionName)")
-            Task {
-                await transcriptRecorder.stopRecording(taskID: taskID, tmux: tmux)
-                await terminateSessionProcesses(
-                    sessionName: sessionName, tmux: tmux,
-                    pkillPath: config.pkillPath, sigtermGracePeriodMs: config.sigtermGracePeriodMs
-                )
-                await runProcessOutput(tmux, args: ["kill-session", "-t", sessionName])
-            }
-        } else {
-            logWarning("TerminalStore.killSession: tmux not found, skipping session kill")
+    private func installReturnFocusMonitor() {
+        guard returnFocusMonitor == nil else { return }
+        returnFocusMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            let flags = event.modifierFlags.intersection([.shift, .option, .command, .control, .function])
+            guard flags.isEmpty, event.keyCode == 36 || event.keyCode == 76,
+                  let firstResponder = NSApplication.shared.keyWindow?.firstResponder,
+                  !(firstResponder is LocalProcessTerminalView), !(firstResponder is NSTextView),
+                  let taskID = self?.selectedTaskID else { return event }
+            Task { @MainActor [weak self] in self?.entries[taskID]?.focusTerminalView() }
+            return nil
         }
+    }
+
+    func terminateAllTerminals() {
+        let taskIDs = Array(entries.keys)
+        taskIDs.forEach(terminateTerminal(for:))
+    }
+
+    func terminateTerminal(for taskID: UUID) {
+        if let entry = entries[taskID] {
+            entry.secondaryPane?.recordsTranscript = false
+            entry.secondaryPane?.terminalView.terminate()
+            entry.terminalView.terminate()
+        }
+        Task { await transcriptRecorder.stop(taskID: taskID) }
+        entries.removeValue(forKey: taskID)
+        activePaneIDsByTask.removeValue(forKey: taskID)
         activeProcessTaskIDs.remove(taskID)
         attentionTaskIDs.remove(taskID)
-        transcriptEnabledTaskIDs.remove(taskID)
+        taskMetadata.removeValue(forKey: taskID)
     }
 
-    /// Clear the attention state when the user opens the task's terminal.
     func clearAttention(taskID: UUID) {
-        logDebug("TerminalStore.clearAttention: task=\(taskID.uuidString)")
         attentionTaskIDs.remove(taskID)
     }
 
-    /// Kill any `<prefix>*` tmux sessions whose task ID is not in `keepingTaskIDs`.
-    func cleanupOrphanedSessions(keepingTaskIDs: Set<UUID>) {
-        guard let tmux = tmuxExecutable(searchPaths: config.tmuxSearchPaths) else { return }
-        let prefix = config.tmuxSessionPrefix
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            let output = await runProcessOutput(tmux, args: ["list-sessions", "-F", "#{session_name}"])
-            let orphans = output
-                .components(separatedBy: .newlines)
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { $0.hasPrefix(prefix) }
-                .compactMap { session -> (session: String, taskID: UUID)? in
-                    let uuidString = String(session.dropFirst(prefix.count))
-                    guard let id = UUID(uuidString: uuidString) else { return nil }
-                    return (session, id)
-                }
-                .filter { !keepingTaskIDs.contains($0.taskID) }
-            guard !orphans.isEmpty else { return }
-            logInfo("TerminalStore.cleanupOrphanedSessions: found \(orphans.count) orphaned session(s)")
-            for (session, taskID) in orphans {
-                logInfo("TerminalStore.cleanupOrphanedSessions: killing \(session)")
-                await transcriptRecorder.stopRecording(taskID: taskID, tmux: tmux)
-                await terminateSessionProcesses(
-                    sessionName: session, tmux: tmux,
-                    pkillPath: config.pkillPath, sigtermGracePeriodMs: config.sigtermGracePeriodMs
-                )
-                await runProcessOutput(tmux, args: ["kill-session", "-t", session])
-                entries[taskID]?.isRunning = false
-                entries.removeValue(forKey: taskID)
-                activeProcessTaskIDs.remove(taskID)
-                attentionTaskIDs.remove(taskID)
-                transcriptEnabledTaskIDs.remove(taskID)
-            }
-        }
-    }
-
-    /// Start recording and cleaning the output of all existing task tmux sessions.
-    /// This deliberately runs independently of the selected task so transcripts remain current
-    /// after a session has been opened once or restored from a prior app launch.
-    func startTranscriptSync(interval: TimeInterval, taskIDsProvider: @escaping @MainActor () -> Set<UUID>) {
-        transcriptSyncTask?.cancel()
-        transcriptSyncTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            while !Task.isCancelled {
-                await synchronizeTranscripts(taskIDs: taskIDsProvider())
-                try? await Task.sleep(for: .seconds(interval))
-            }
-        }
-    }
-
-    /// Transcript session directories recorded for a task, most recently modified first.
-    /// Empty when the task's terminal has never been opened (or its transcripts were deleted).
     func transcriptDirectories(for taskID: UUID) -> [URL] {
         transcriptRecorder.transcriptDirectories(for: taskID)
     }
-
-    private func synchronizeTranscripts(taskIDs: Set<UUID>) async {
-        guard let tmux = tmuxExecutable(searchPaths: config.tmuxSearchPaths) else { return }
-        let sessionOutput = await runProcessOutput(tmux, args: ["list-sessions", "-F", "#{session_name}"])
-        let existingSessions = Set(
-            sessionOutput
-                .split(separator: "\n")
-                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-        )
-        for taskID in taskIDs where !Task.isCancelled {
-            let sessionName = "\(config.tmuxSessionPrefix)\(taskID.uuidString)"
-            guard existingSessions.contains(sessionName) else { continue }
-            await transcriptRecorder.reconcile(taskID: taskID, sessionName: sessionName, tmux: tmux)
-        }
-    }
-
-    /// Start a repeating cleanup that kills orphaned tmux sessions.
-    func startPeriodicCleanup(interval: TimeInterval = 300, taskIDsProvider: @escaping @MainActor () -> Set<UUID>) {
-        periodicCleanupTask?.cancel()
-        periodicCleanupTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            cleanupOrphanedSessions(keepingTaskIDs: taskIDsProvider())
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(interval))
-                guard !Task.isCancelled else { break }
-                cleanupOrphanedSessions(keepingTaskIDs: taskIDsProvider())
-            }
-        }
-    }
 }
-
-/// Send SIGTERM to all child processes of each pane in a tmux session, then wait briefly
-/// for them to handle the signal before the caller kills the session.
-nonisolated func terminateSessionProcesses(
-    sessionName: String, tmux: String,
-    pkillPath: String, sigtermGracePeriodMs: Int
-) async {
-    let paneOutput = await runProcessOutput(
-        tmux, args: ["list-panes", "-s", "-t", sessionName, "-F", "#{pane_pid}"]
-    )
-    let panePIDs = paneOutput
-        .components(separatedBy: .newlines)
-        .map { $0.trimmingCharacters(in: .whitespaces) }
-        .filter { !$0.isEmpty }
-    guard !panePIDs.isEmpty else { return }
-    logDebug("terminateSessionProcesses: \(sessionName) has \(panePIDs.count) pane(s)")
-    for pid in panePIDs {
-        logDebug("terminateSessionProcesses: SIGTERM children of pane shell pid=\(pid)")
-        await runProcessOutput(pkillPath, args: ["-TERM", "-P", pid])
-    }
-    try? await Task.sleep(for: .milliseconds(sigtermGracePeriodMs))
-}
-
-func tmuxExecutable(searchPaths: [String] = ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"]) -> String? {
-    let found = searchPaths.first { FileManager.default.isExecutableFile(atPath: $0) }
-    logDebug("tmuxExecutable: found=\(found ?? "nil")")
-    return found
-}
-
-// MARK: - Font helpers
 
 private func resolvedFont(_ config: TerminalConfig) -> NSFont {
     let size = CGFloat(config.fontSize)
@@ -1067,13 +560,13 @@ private func resolvedFont(_ config: TerminalConfig) -> NSFont {
 private func fontWeightValue(_ string: String) -> NSFont.Weight {
     switch string.lowercased() {
     case "ultralight": return .ultraLight
-    case "thin":       return .thin
-    case "light":      return .light
-    case "medium":     return .medium
-    case "semibold":   return .semibold
-    case "bold":       return .bold
-    case "heavy":      return .heavy
-    case "black":      return .black
-    default:           return .regular
+    case "thin": return .thin
+    case "light": return .light
+    case "medium": return .medium
+    case "semibold": return .semibold
+    case "bold": return .bold
+    case "heavy": return .heavy
+    case "black": return .black
+    default: return .regular
     }
 }

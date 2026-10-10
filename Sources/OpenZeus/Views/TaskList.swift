@@ -115,7 +115,7 @@ struct TaskList: View {
     private func archiveTask(_ task: AgentTask) {
         if selection == task { selection = nil }
         if !task.isArchived {
-            terminalStore.killSession(for: task.id)
+            terminalStore.terminateTerminal(for: task.id)
             removeWorktreeIfNeeded(for: task)
         }
         var updated = task
@@ -125,7 +125,7 @@ struct TaskList: View {
 
     private func deleteTask(_ task: AgentTask) {
         if selection == task { selection = nil }
-        terminalStore.killSession(for: task.id)
+        terminalStore.terminateTerminal(for: task.id)
         removeWorktreeIfNeeded(for: task)
         appDatabase.deleteTask(id: task.id)
     }

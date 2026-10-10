@@ -208,87 +208,12 @@ private func startupTestDirectory() throws -> URL {
     #expect(try database.takeTaskStartupCommand(taskID: task.id) == nil)
 }
 
-@Test func startupCommandTmuxLaunchQueuesLiteralInputAfterSessionCreation() {
-    let arguments = TaskStartupCommand.tmuxLaunchArguments(
-        sessionName: "test", shell: "/bin/bash", workingDirectory: "/worktree with spaces",
-        startupCommand: "npm i && cd mocks && npm i && cd ..;"
-    )
-    #expect(arguments == [
-        "new-session", "-A", "-c", "/worktree with spaces", "-s", "test", "/bin/bash", "-l",
-        ";", "send-keys", "-t", "test", "-l", "--", "npm i && cd mocks && npm i && cd ..\\;",
-        ";", "send-keys", "-t", "test", "Enter"
-    ])
-    let reopened = TaskStartupCommand.tmuxLaunchArguments(
-        sessionName: "test", shell: "/bin/bash", workingDirectory: "/project", startupCommand: nil
-    )
-    #expect(!reopened.contains("send-keys"))
-}
-
-private func runStartupTestProcess(_ executable: String, arguments: [String]) throws -> Int32 {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: executable)
-    process.arguments = arguments
-    process.standardOutput = FileHandle.nullDevice
-    process.standardError = FileHandle.nullDevice
-    try process.run()
-    process.waitUntilExit()
-    return process.terminationStatus
-}
-
 private func waitForStartupOutput(_ url: URL, expected: String) async throws {
     for _ in 0..<200 {
         if (try? String(contentsOf: url, encoding: .utf8)) == expected { return }
         try await Task.sleep(for: .milliseconds(25))
     }
     #expect(try String(contentsOf: url, encoding: .utf8) == expected)
-}
-
-@Test(arguments: ["/bin/bash", "/bin/zsh"])
-@MainActor func startupCommandRunsOnceInWorktreeWithTmux(shell: String) async throws {
-    guard let tmux = tmuxExecutable() else { return }
-    let directory = try startupTestDirectory()
-    defer { try? FileManager.default.removeItem(at: directory) }
-    let worktree = directory.appendingPathComponent("worktree with spaces")
-    try FileManager.default.createDirectory(at: worktree, withIntermediateDirectories: true)
-    try "sleep 0.2\n".write(to: directory.appendingPathComponent(".bash_profile"), atomically: true, encoding: .utf8)
-    try "sleep 0.2\n".write(to: directory.appendingPathComponent(".zshrc"), atomically: true, encoding: .utf8)
-    let socket = "zeus-startup-test-\(UUID().uuidString)"
-    let prefix = ["-L", socket, "-f", "/dev/null"]
-    defer { _ = try? runStartupTestProcess(tmux, arguments: prefix + ["kill-server"]) }
-    let commandText = "pwd >> output && mkdir mocks && cd mocks && pwd >> ../output && cd .. && printf 'done\\n' >> output;"
-    let fixture = try StartupFixture(commandText: commandText)
-    var task = fixture.task()
-    task.worktreePath = worktree.path
-    try fixture.database.insertNewTask(task)
-    let command = try fixture.database.takeTaskStartupCommand(taskID: task.id)
-    var arguments = TaskStartupCommand.tmuxLaunchArguments(
-        sessionName: "task", shell: shell, workingDirectory: task.effectiveWorkingDirectory, startupCommand: command
-    )
-    arguments.insert(contentsOf: ["-e", "HOME=\(directory.path)", "-e", "ZDOTDIR=\(directory.path)"], at: 1)
-    let entry = TerminalEntry(taskID: task.id)
-    entry.terminalView.startProcess(
-        executable: tmux, args: prefix + arguments,
-        environment: ["HOME=\(directory.path)", "PATH=/usr/bin:/bin", "TERM=xterm-256color"],
-        currentDirectory: task.effectiveWorkingDirectory
-    )
-    defer { entry.terminalView.process?.terminate() }
-    #expect(entry.terminalView.process?.running == true)
-    let expected = "\(worktree.path)\n\(worktree.path)/mocks\ndone\n"
-    let output = worktree.appendingPathComponent("output")
-    try await waitForStartupOutput(output, expected: expected)
-
-    let reopenedCommand = try fixture.database.takeTaskStartupCommand(taskID: task.id)
-    #expect(reopenedCommand == nil)
-    var reopenedArguments = TaskStartupCommand.tmuxLaunchArguments(
-        sessionName: "task", shell: shell, workingDirectory: task.effectiveWorkingDirectory, startupCommand: reopenedCommand
-    )
-    reopenedArguments.insert("-d", at: 1)
-    _ = try runStartupTestProcess(tmux, arguments: prefix + reopenedArguments)
-    #expect(try runStartupTestProcess(tmux, arguments: prefix + ["new-window", "-d", "-t", "task", shell]) == 0)
-    #expect(try runStartupTestProcess(tmux, arguments: prefix + ["resize-window", "-x", "120", "-y", "40", "-t", "task"]) == 0)
-    #expect(try runStartupTestProcess(tmux, arguments: prefix + ["split-window", "-d", "-t", "task", shell]) == 0)
-    try await Task.sleep(for: .milliseconds(100))
-    #expect(try String(contentsOf: output, encoding: .utf8) == expected)
 }
 
 @Test(arguments: ["/bin/bash", "/bin/zsh"])

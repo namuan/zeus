@@ -49,7 +49,6 @@ Annotated example config file showing every key with its default and a comment e
 | Key | Type | Default | Current location |
 |-----|------|---------|-----------------|
 | `pollIntervalSeconds` | Double | `2.0` | `TerminalStore.swift:70` |
-| `tmuxSettleDelayMs` | Int | `200` | `TerminalStore.swift:184` (and 6 others) |
 | `orphanCleanupIntervalSeconds` | Double | `300.0` | `TerminalStore.swift:562` |
 | `sigtermGracePeriodMs` | Int | `300` | `TerminalStore.swift:594` |
 | `mouseModeDelayMs` | Int | `300` | `TerminalView.swift:551` |
@@ -57,10 +56,8 @@ Annotated example config file showing every key with its default and a comment e
 | `fontFamily` | String | `"monospacedSystemFont"` | `TerminalStore.swift:56` |
 | `fontSize` | Int | `13` | `TerminalStore.swift:56` |
 | `fontWeight` | String | `"regular"` | `TerminalStore.swift:56` |
-| `tmuxSearchPaths` | [String] | `["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"]` | `TerminalStore.swift:598` |
 | `pkillPath` | String | `"/usr/bin/pkill"` | `TerminalStore.swift:591` |
-| `tmuxSessionPrefix` | String | `"zeus-"` | `TerminalStore.swift:84` (and 11 others) |
-| `knownShells` | [String] | `["zsh", "bash", "sh", "fish", "dash", "csh", "tcsh", "login", "tmux", "tmux: server"]` | `TerminalStore.swift:47` |
+| `knownShells` | [String] | `["zsh", "bash", "sh", "fish", "dash", "csh", "tcsh", "login"]` | `TerminalStore.swift` |
 
 ### `logging` — File logger settings
 
