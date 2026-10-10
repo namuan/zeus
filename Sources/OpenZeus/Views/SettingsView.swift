@@ -777,7 +777,7 @@ private struct DataTab: View {
 
             Section("Terminal Transcripts") {
                 HStack {
-                    Text("Direct-shell transcript recording is not available in this POC.")
+                    Text("Direct PTY output is sanitized and saved as plain-text transcripts.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
