@@ -1,0 +1,1 @@
+Remove two flaky worktree integration tests and their now-unused fixture helpers.
