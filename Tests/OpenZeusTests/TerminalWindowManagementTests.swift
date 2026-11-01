@@ -101,6 +101,19 @@ import Testing
     #expect(entry.projectDirectory == "/project")
 }
 
+@Test @MainActor func terminalStoreSplitUsesActivePaneDirectoryTest() {
+    let store = TerminalStore()
+    let taskID = UUID()
+    let entry = store.entry(for: taskID)
+    entry.workingDirectory = "/task"
+    entry.activePaneDirectory = "/active/pane"
+
+    store.splitTerminal(taskID: taskID, orientation: .horizontal)
+
+    #expect(entry.secondaryPane?.workingDirectory == "/active/pane")
+    #expect(entry.secondaryPane?.activePaneDirectory == "/active/pane")
+}
+
 @Test @MainActor func terminalStoreSplitsAndClosesTaskTerminalTest() {
     let store = TerminalStore()
     let taskID = UUID()

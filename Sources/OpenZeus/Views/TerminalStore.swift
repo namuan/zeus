@@ -107,6 +107,12 @@ final class TerminalEntry: ObservableObject {
         activePaneDirectory = terminal.activePaneDirectory.isEmpty ? terminal.workingDirectory : terminal.activePaneDirectory
     }
 
+    var currentWorkingDirectory: String {
+        let directory = activePaneDirectory.isEmpty ? workingDirectory : activePaneDirectory
+        guard let url = URL(string: directory), url.isFileURL else { return directory }
+        return url.path
+    }
+
     func currentPaneDirectory(fallback: String? = nil) async -> String {
         let terminal = activeTerminal
         let directory = terminal.activePaneDirectory.isEmpty ? (fallback ?? terminal.workingDirectory) : terminal.activePaneDirectory
@@ -414,8 +420,8 @@ final class TerminalStore: ObservableObject {
     func splitTerminal(taskID: UUID, orientation: TerminalSplitOrientation) {
         guard let root = entries[taskID] else { return }
         if root.primaryPaneClosed, let active = root.secondaryPane {
-            root.workingDirectory = active.workingDirectory
-            root.activePaneDirectory = active.activePaneDirectory
+            root.workingDirectory = active.currentWorkingDirectory
+            root.activePaneDirectory = active.currentWorkingDirectory
             root.terminalView.terminal.resetToInitialState()
             root.terminalView.needsDisplay = true
             root.primaryPaneClosed = false
@@ -428,8 +434,8 @@ final class TerminalStore: ObservableObject {
         let pane = TerminalEntry(taskID: taskID, config: config, paneID: UUID(), isPrimaryPane: false)
         pane.parentEntry = root
         pane.recordsTranscript = root.recordsTranscript
-        pane.workingDirectory = active.workingDirectory
-        pane.activePaneDirectory = active.activePaneDirectory
+        pane.workingDirectory = active.currentWorkingDirectory
+        pane.activePaneDirectory = active.currentWorkingDirectory
         pane.projectDirectory = active.projectDirectory
         pane.projectName = active.projectName
         pane.taskName = active.taskName
