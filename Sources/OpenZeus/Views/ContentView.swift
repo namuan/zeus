@@ -16,13 +16,30 @@ struct ContentView: View {
     @Environment(\.appConfig) private var appConfig
     @State private var selectedProject: Project?
     @State private var selectedTask: AgentTask?
+    @State private var showingTaskBoard = false
     @AppStorage("lastSelectedProjectID") private var lastSelectedProjectID = ""
     @FocusState private var focusedPanel: FocusedPanel?
     @State private var keyMonitor: Any?
 
     var body: some View {
-        splitView
-            .background(SidebarToggleRemover())
+        Group {
+            if showingTaskBoard {
+                TaskBoardView(onSelectTask: selectTaskFromBoard)
+            } else {
+                splitView
+                    .background(SidebarToggleRemover())
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showingTaskBoard.toggle()
+                } label: {
+                    Label(showingTaskBoard ? "Projects" : "Task Board", systemImage: showingTaskBoard ? "rectangle.3.group" : "rectangle.split.2x2")
+                }
+                .help(showingTaskBoard ? "Return to projects" : "Show open and in-progress tasks")
+            }
+        }
             .task {
                 restoreSelection()
             }
@@ -133,6 +150,7 @@ struct ContentView: View {
     private func switchProject(from old: Project?, to new: Project?) {
         guard old?.id != new?.id else { return }
         UserDefaults.standard.setValue(new?.id.uuidString ?? "", forKey: "lastSelectedProjectID")
+        if selectedTask?.projectID == new?.id { return }
         if let projectID = new?.id.uuidString,
            let taskIDString = lastTaskPerProject[projectID],
            let taskID = UUID(uuidString: taskIDString),
@@ -141,6 +159,12 @@ struct ContentView: View {
         } else {
             selectedTask = nil
         }
+    }
+
+    private func selectTaskFromBoard(_ task: AgentTask, project: Project) {
+        selectedProject = project
+        selectedTask = task
+        showingTaskBoard = false
     }
 
     private func restoreSelection() {
