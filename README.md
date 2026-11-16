@@ -63,6 +63,7 @@ https://github.com/user-attachments/assets/b693f65c-2a82-4836-8168-aefe28c2242c
 |----------|--------|
 | `Cmd+1` | Focus Projects panel |
 | `Cmd+2` | Focus Tasks panel |
+| `Cmd+3` | Toggle Task Board and return to the last selected task |
 | `↑` / `↓` | Navigate project or task list |
 | `Enter` | Focus terminal from task list |
 | `Escape` | Close Settings window |

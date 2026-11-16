@@ -8,6 +8,7 @@ private enum FocusedPanel: Hashable {
 private extension Notification.Name {
     static let focusProjectsPanel = Notification.Name("OpenZeus.focusProjectsPanel")
     static let focusTasksPanel = Notification.Name("OpenZeus.focusTasksPanel")
+    static let toggleTaskBoard = Notification.Name("OpenZeus.toggleTaskBoard")
 }
 
 struct ContentView: View {
@@ -71,12 +72,15 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: .focusTasksPanel)) { _ in
                 focusedPanel = .tasks
             }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleTaskBoard)) { _ in
+                showingTaskBoard.toggle()
+            }
     }
 
     private func setupKeyMonitor() {
         guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            guard event.charactersIgnoringModifiers == "1" || event.charactersIgnoringModifiers == "2",
+            guard ["1", "2", "3"].contains(event.charactersIgnoringModifiers ?? ""),
                   event.modifierFlags.intersection([.command, .shift, .option, .control]) == .command else {
                 return event
             }
@@ -86,6 +90,9 @@ struct ContentView: View {
                 return nil
             case "2":
                 NotificationCenter.default.post(name: .focusTasksPanel, object: nil)
+                return nil
+            case "3":
+                NotificationCenter.default.post(name: .toggleTaskBoard, object: nil)
                 return nil
             default:
                 return event
